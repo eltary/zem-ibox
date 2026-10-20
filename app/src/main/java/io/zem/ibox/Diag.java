@@ -17,7 +17,7 @@ public final class Diag {
     private static final SimpleDateFormat clock = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS Z",Locale.ROOT);
     public static synchronized void init(Context c) {
         dir=new File(c.getFilesDir(),"logs"); dir.mkdirs();preferences=c.getSharedPreferences("diagnostics",Context.MODE_PRIVATE);enabled=preferences.getBoolean("enabled",true);
-        log("APP","START Zem iBox Drive "+BuildConfig.VERSION_NAME+" Android "+Build.VERSION.RELEASE+" API "+Build.VERSION.SDK_INT+" "+Build.MANUFACTURER+" "+Build.MODEL+" ABIs="+Arrays.toString(Build.SUPPORTED_ABIS));
+        log("APP","START Zem iBox "+BuildConfig.VERSION_NAME+" Android "+Build.VERSION.RELEASE+" API "+Build.VERSION.SDK_INT+" "+Build.MANUFACTURER+" "+Build.MODEL+" ABIs="+Arrays.toString(Build.SUPPORTED_ABIS));
         Thread.UncaughtExceptionHandler previous=Thread.getDefaultUncaughtExceptionHandler();
         Thread.setDefaultUncaughtExceptionHandler((t,e)->{error("CRASH "+t.getName(),e); if(previous!=null)previous.uncaughtException(t,e);});
         if(enabled)startNativeCapture("1");
@@ -27,7 +27,7 @@ public final class Diag {
         if(enabled==value)return;
         if(!preferences.edit().putBoolean("enabled",value).commit())throw new IOException("Не удалось сохранить настройку записи логов");
         if(!value){log("APP","Diagnostic recording disabled by user");enabled=false;stopNativeCapture();}
-        else{enabled=true;startNativeCapture(new SimpleDateFormat("MM-dd HH:mm:ss.SSS",Locale.ROOT).format(new Date()));log("APP","Diagnostic recording enabled by user. Zem iBox Drive "+BuildConfig.VERSION_NAME);}
+        else{enabled=true;startNativeCapture(new SimpleDateFormat("MM-dd HH:mm:ss.SSS",Locale.ROOT).format(new Date()));log("APP","Diagnostic recording enabled by user. Zem iBox "+BuildConfig.VERSION_NAME);}
     }
     private static void startNativeCapture(String since){
         try {androidCapture=new ProcessBuilder("logcat","--pid="+android.os.Process.myPid(),"-b","main","-b","crash","-v","threadtime","-T",since,"-f",new File(dir,"android.log").getPath(),"-r","2048","-n","4").start();}
@@ -47,13 +47,13 @@ public final class Diag {
         try{
             File[] files=dir.listFiles();if(files==null)throw new IOException("Журнал недоступен");
             for(File f:files)if(f.getName().matches("roadlink(?:\\.[1-9])?\\.log|android\\.log(?:\\.[1-4])?"))java.nio.file.Files.deleteIfExists(f.toPath());
-            log("APP","Logs cleared by user. Zem iBox Drive "+BuildConfig.VERSION_NAME+" "+Build.MANUFACTURER+" "+Build.MODEL+" Android "+Build.VERSION.RELEASE+" API "+Build.VERSION.SDK_INT);
+            log("APP","Logs cleared by user. Zem iBox "+BuildConfig.VERSION_NAME+" "+Build.MANUFACTURER+" "+Build.MODEL+" Android "+Build.VERSION.RELEASE+" API "+Build.VERSION.SDK_INT);
         }finally{if(enabled)startNativeCapture(since);}
     }
     public static synchronized void log(String tag,String value) {
         if(dir==null||!enabled)return;
         value=redact(value);
-        Log.i("Zem iBox Drive/"+tag,value.length()>3500?value.substring(0,3500):value);
+        Log.i("Zem iBox/"+tag,value.length()>3500?value.substring(0,3500):value);
         try {
             File active=new File(dir,"roadlink.log");
             if(active.length()>2*1024*1024) {
@@ -62,7 +62,7 @@ public final class Diag {
                 active.renameTo(new File(dir,"roadlink.1.log"));
             }
             try(FileOutputStream out=new FileOutputStream(active,true)) {out.write((clock.format(new Date())+" ["+tag+"] "+value+"\n").getBytes(StandardCharsets.UTF_8));}
-        } catch(IOException e){Log.e("Zem iBox Drive/LOG", "Log write failed",e);}
+        } catch(IOException e){Log.e("Zem iBox/LOG", "Log write failed",e);}
     }
     static String redact(String s) {
         return s.replaceAll("(?i)(\"(?:pwd|password|token)\"\\s*:\\s*\")[^\"]*","$1[REDACTED]");

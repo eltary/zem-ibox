@@ -57,7 +57,7 @@ public final class MainActivity extends Activity {
     private void build(){
         root.removeAllViews();
         if(fullScreen){fullScreenPage();return;}
-        LinearLayout title=row();TextView brand=text("Zem iBox Drive",23,INK);brand.setTypeface(null,Typeface.BOLD);title.addView(brand,new LinearLayout.LayoutParams(0,dp(48),1));
+        LinearLayout title=row();TextView brand=text("Zem iBox",23,INK);brand.setTypeface(null,Typeface.BOLD);title.addView(brand,new LinearLayout.LayoutParams(0,dp(48),1));
         Button logs=button("Логи",false);logs.setOnClickListener(v->showLogs());title.addView(logs);root.addView(title);
         LinearLayout box=column();box.setPadding(dp(14),dp(12),dp(14),dp(12));box.setBackground(shape(CARD,16));
         connection=text("",16,INK);connection.setTypeface(null,Typeface.BOLD);box.addView(connection);
@@ -230,18 +230,18 @@ public final class MainActivity extends Activity {
         Button clear=button("Очистить логи",false);clear.setOnClickListener(v->clearLogs(log));content.addView(clear);
         TextView info=text("Команды, ответы, Wi-Fi, HTTP, ошибки и видеопоток. Пароли скрыты. Храним около 30 МБ; полный журнал копируется по частям без обрезки.",12,MUTED);content.addView(info);
         ScrollView logScroll=new ScrollView(this);logScroll.addView(log);content.addView(logScroll,new LinearLayout.LayoutParams(-1,dp(220)));
-        ScrollView panel=new ScrollView(this);panel.addView(content);new AlertDialog.Builder(this).setTitle("Диагностика Zem iBox Drive").setView(panel).setNegativeButton("Закрыть",null).show();
+        ScrollView panel=new ScrollView(this);panel.addView(content);new AlertDialog.Builder(this).setTitle("Диагностика Zem iBox").setView(panel).setNegativeButton("Закрыть",null).show();
     }
     private Switch loggingSwitch(){Switch toggle=new Switch(this);toggle.setText("Запись логов");toggle.setTextColor(INK);toggle.setTextSize(15);toggle.setMinHeight(dp(48));toggle.setChecked(Diag.enabled());toggle.setOnCheckedChangeListener((button,checked)->{toggle.setEnabled(false);s.worker.execute(()->{try{Diag.setEnabled(checked);s.main.post(()->{toggle.setEnabled(true);clipboardParts=null;clipboardIndex=0;toast(checked?"Запись логов включена":"Запись логов выключена, сохранённые логи остаются");});}catch(Exception e){s.main.post(()->{toggle.setEnabled(true);fail("Запись логов",e);});}});});return toggle;}
     private void clearLogs(TextView preview){
-        async("Очистка логов",Diag::clear,()->{clipboardParts=null;clipboardIndex=0;copyButton.setText("Скопировать полные логи");preview.setText(Diag.tail());android.content.ClipboardManager cb=getSystemService(android.content.ClipboardManager.class);if(cb.hasPrimaryClip()&&cb.getPrimaryClipDescription()!=null&&TextUtils.equals("Zem iBox Drive logs",cb.getPrimaryClipDescription().getLabel()))cb.clearPrimaryClip();toast(Diag.enabled()?"Логи очищены. Новые события продолжают записываться":"Логи очищены. Запись выключена");});
+        async("Очистка логов",Diag::clear,()->{clipboardParts=null;clipboardIndex=0;copyButton.setText("Скопировать полные логи");preview.setText(Diag.tail());android.content.ClipboardManager cb=getSystemService(android.content.ClipboardManager.class);if(cb.hasPrimaryClip()&&cb.getPrimaryClipDescription()!=null&&TextUtils.equals("Zem iBox logs",cb.getPrimaryClipDescription().getLabel()))cb.clearPrimaryClip();toast(Diag.enabled()?"Логи очищены. Новые события продолжают записываться":"Логи очищены. Запись выключена");});
     }
     private void openLocal(Uri uri,String mime){try{startActivity(MediaOpen.chooser(uri,mime));}catch(ActivityNotFoundException e){fail("Открыть файл",new IOException("На телефоне нет приложения для этого формата",e));}}
     private void copyLogs(){
         try {
             if(clipboardParts==null||clipboardIndex>=clipboardParts.size()){clipboardParts=Diag.copyParts(s.report()+"\nUSER NOTE: "+note);clipboardIndex=0;}
-            String value="Zem iBox Drive · часть "+(clipboardIndex+1)+"/"+clipboardParts.size()+"\n"+clipboardParts.get(clipboardIndex);
-            getSystemService(android.content.ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("Zem iBox Drive logs",value));clipboardIndex++;
+            String value="Zem iBox · часть "+(clipboardIndex+1)+"/"+clipboardParts.size()+"\n"+clipboardParts.get(clipboardIndex);
+            getSystemService(android.content.ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("Zem iBox logs",value));clipboardIndex++;
             copyButton.setText(clipboardIndex<clipboardParts.size()?"Скопировать часть "+(clipboardIndex+1)+"/"+clipboardParts.size():"Скопировано всё · собрать свежие");toast("Скопирована часть "+clipboardIndex+"/"+clipboardParts.size());
         }catch(Exception e){fail("Копирование логов",e);}
     }
@@ -250,7 +250,7 @@ public final class MainActivity extends Activity {
     private void async(String name,Work work,Runnable after){s.worker.execute(()->{try{work.run();if(after!=null)s.main.post(after);}catch(Exception e){s.main.post(()->fail(name,e));}});}
     private void fail(String context,Throwable e){Diag.error(context,e);new AlertDialog.Builder(this).setTitle(context).setMessage(e.getMessage()==null?e.toString():e.getMessage()).setPositiveButton("Понятно",null).setNeutralButton("Логи",(d,w)->showLogs()).show();}
     private void confirm(String title,String message,Runnable action){new AlertDialog.Builder(this).setTitle(title).setMessage(message).setNegativeButton("Отмена",null).setPositiveButton("Подтвердить",(d,w)->action.run()).show();}
-    private void share(Uri uri,String mime){try{Intent send=new Intent(Intent.ACTION_SEND).setType(mime).putExtra(Intent.EXTRA_STREAM,uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);send.setClipData(ClipData.newRawUri("Zem iBox Drive",uri));startActivity(Intent.createChooser(send,"Поделиться записью"));}catch(Exception e){fail("Отправка",e);}}
+    private void share(Uri uri,String mime){try{Intent send=new Intent(Intent.ACTION_SEND).setType(mime).putExtra(Intent.EXTRA_STREAM,uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);send.setClipData(ClipData.newRawUri("Zem iBox",uri));startActivity(Intent.createChooser(send,"Поделиться записью"));}catch(Exception e){fail("Отправка",e);}}
     private static JSONObject p(String...pairs){try{return JieliSession.params(pairs);}catch(JSONException e){throw new IllegalArgumentException(e);}}
     private static JSONObject cloneJson(JSONObject v){try{return new JSONObject(v.toString());}catch(Exception e){return new JSONObject();}}
     private String stamp(){return new SimpleDateFormat("yyyyMMdd-HHmmss",Locale.ROOT).format(new Date());}

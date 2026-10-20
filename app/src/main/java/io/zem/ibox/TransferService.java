@@ -53,7 +53,7 @@ public final class TransferService extends Service {
             String origin=sourceDevice;
             for(MediaItem item:items){
             queue.execute(()->{
-                PowerManager.WakeLock wake=getSystemService(PowerManager.class).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"Zem iBox Drive:download");wake.acquire(6*60*60*1000L);
+                PowerManager.WakeLock wake=getSystemService(PowerManager.class).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"Zem iBox:download");wake.acquire(6*60*60*1000L);
                 try{if(cancel)return;if(!origin.equals(deviceKey(RoadApp.instance.session)))throw new IOException("Подключён другой регистратор. Вернись к исходной сети");Diag.log("QUEUE ITEM",(batchFinished+1)+"/"+batchTotal+" "+item.time+" "+item.path);download(item);}
                 catch(Exception e){batchFailed++;Diag.error("Download "+item.path,e);if(!RoadApp.instance.session.connected()||!origin.equals(deviceKey(RoadApp.instance.session)))cancel=true;progress=e.getMessage()+". Частичная копия сохранена; скачай папку снова для продолжения.";RoadApp.instance.session.changed();if(checkSelfPermission("android.permission.POST_NOTIFICATIONS")==android.content.pm.PackageManager.PERMISSION_GRANTED)nm.notify(16,notification(progress,0,0));}
                 finally{if(wake.isHeld())wake.release();synchronized(TransferService.this){batchFinished++;if(count.decrementAndGet()==0){active=false;if(batchTotal>1)progress=cancel?"Очередь остановлена. Скачай папку снова для продолжения":batchFailed>0?"Очередь завершена · ошибок: "+batchFailed+". Повтори скачивание папки":"Папка скачана · файлов: "+batchTotal;Diag.log("QUEUE COMPLETE",progress);stopForeground(STOP_FOREGROUND_REMOVE);stopSelfResult(id);RoadApp.instance.session.changed();}}}
@@ -113,7 +113,7 @@ public final class TransferService extends Service {
     private Notification notification(String text,long done,long total){
         PendingIntent open=PendingIntent.getActivity(this,0,new Intent(this,MainActivity.class),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
         PendingIntent stop=PendingIntent.getService(this,1,new Intent(this,TransferService.class).setAction("cancel"),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
-        Notification.Builder b=new Notification.Builder(this,"downloads").setSmallIcon(android.R.drawable.stat_sys_download).setContentTitle("Zem iBox Drive").setContentText(text).setContentIntent(open).setOnlyAlertOnce(true).setOngoing(active).addAction(new Notification.Action.Builder(null,"Отменить",stop).build());
+        Notification.Builder b=new Notification.Builder(this,"downloads").setSmallIcon(android.R.drawable.stat_sys_download).setContentTitle("Zem iBox").setContentText(text).setContentIntent(open).setOnlyAlertOnce(true).setOngoing(active).addAction(new Notification.Action.Builder(null,"Отменить",stop).build());
         if(total>0)b.setProgress(100,(int)Math.min(100,done*100/total),false);else if(active)b.setProgress(0,0,true);return b.build();
     }
     private void show(String text,long done,long total){progress=(batchTotal>1?(batchFinished+1)+"/"+batchTotal+" · ":"")+text;if(checkSelfPermission("android.permission.POST_NOTIFICATIONS")==android.content.pm.PackageManager.PERMISSION_GRANTED)nm.notify(15,notification(progress,done,total));RoadApp.instance.session.changed();}

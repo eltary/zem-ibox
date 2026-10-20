@@ -122,5 +122,5 @@ public final class JieliSession {
         for(int i=0;i<a.length();i++)list.add(new MediaItem(a.getJSONObject(i),camera));
         list.sort(MediaItem.newestFirst());return list;
     }
-    public String report(){return "Zem iBox Drive "+BuildConfig.VERSION_NAME+"\n"+Build.MANUFACTURER+" "+Build.MODEL+" Android "+Build.VERSION.RELEASE+" API "+Build.VERSION.SDK_INT+"\nloggingEnabled="+Diag.enabled()+"\ndestructiveActions="+BuildConfig.ALLOW_DESTRUCTIVE_ACTIONS+"\nstatus="+status+"\nhost="+host+"\nnetwork="+network+"\ndescription="+description+"\nstate="+state+"\n";}
+    public String report(){return "Zem iBox "+BuildConfig.VERSION_NAME+"\n"+Build.MANUFACTURER+" "+Build.MODEL+" Android "+Build.VERSION.RELEASE+" API "+Build.VERSION.SDK_INT+"\nloggingEnabled="+Diag.enabled()+"\ndestructiveActions="+BuildConfig.ALLOW_DESTRUCTIVE_ACTIONS+"\nstatus="+status+"\nhost="+host+"\nnetwork="+network+"\ndescription="+description+"\nstate="+state+"\n";}
 }

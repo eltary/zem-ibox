@@ -40,7 +40,7 @@ public final class CtpClient implements AutoCloseable {
         finally {waiting.remove(topic,f);}
     }
     public synchronized void send(String topic,String op,JSONObject params)throws Exception {
-        if(!BuildConfig.ALLOW_DESTRUCTIVE_ACTIONS&&java.util.Set.of("FILES_DELETE","FORMAT","FORMAT_TF_CARD").contains(topic.trim().toUpperCase(java.util.Locale.ROOT))){Diag.log("BLOCKED","Destructive command disabled during testing: "+topic);throw new SecurityException("Удаление файлов и форматирование карты заблокированы на время проверки Zem iBox Drive");}
+        if(!BuildConfig.ALLOW_DESTRUCTIVE_ACTIONS&&java.util.Set.of("FILES_DELETE","FORMAT","FORMAT_TF_CARD").contains(topic.trim().toUpperCase(java.util.Locale.ROOT))){Diag.log("BLOCKED","Destructive command disabled during testing: "+topic);throw new SecurityException("Удаление файлов и форматирование карты заблокированы на время проверки Zem iBox");}
         if(closed)throw new IOException("Соединение закрыто");
         JSONObject j=new JSONObject().put("op",op);if(params!=null)j.put("param",params);
         String value=j.toString();Diag.log("CTP TX",topic+" "+value);
