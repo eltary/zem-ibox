@@ -56,8 +56,9 @@ Only emulator-5586 belongs to this project; never operate on other emulators.
   pass -Pzem.abis=x86_64 for this project's emulator QA builds.
 - No letters (especially Z) in the launcher icon. Keep adaptive and monochrome
   versions, and inspect the real Android icon at small size.
-- Prefer a restrained matte automotive camera/road icon. Avoid luminous
-  glass, chrome detailing and a flashy cinematic product-render appearance.
+- The launcher brand mark must be an abstract road/motion symbol with no
+  camera housing, lens, eyes or face. This user correction supersedes the
+  former camera/road direction. Keep color and monochrome artwork aligned.
 
 ## Visual system
 
