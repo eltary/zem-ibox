@@ -19,21 +19,25 @@ import java.util.concurrent.atomic.*;
 
 public final class SmokeTest extends Instrumentation {
     private int assertions;
+    private boolean uiOnly;
     private MainActivity activity;
     interface Condition {boolean ok()throws Exception;}
     void check(boolean value,String message){assertions++;if(!value)throw new AssertionError(message);Diag.log("TEST PASS",message);}
     void waitFor(Condition c,int ms)throws Exception{long end=System.currentTimeMillis()+ms;while(System.currentTimeMillis()<end){if(c.ok())return;Thread.sleep(100);}throw new AssertionError("Condition timed out after "+ms+"ms");}
     Object field(String name)throws Exception{Field f=MainActivity.class.getDeclaredField(name);f.setAccessible(true);return f.get(activity);}
     void invoke(String name,Class<?>[] types,Object...args)throws Exception{Method m=MainActivity.class.getDeclaredMethod(name,types);m.setAccessible(true);runOnMainSync(()->{try{m.invoke(activity,args);}catch(Exception e){throw new RuntimeException(e);}});}
-    public void onCreate(Bundle arguments){super.onCreate(arguments);start();}
+    public void onCreate(Bundle arguments){super.onCreate(arguments);uiOnly=arguments!=null&&"true".equals(arguments.getString("ui_only"));start();}
     public void onStart(){
         Bundle result=new Bundle();
         try{
             try(InputStream in=new URL("http://10.0.2.2:8080/test/reset").openStream()){while(in.read()!=-1){}}
             Intent launch=new Intent(getTargetContext(),MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("test_host","10.0.2.2");activity=(MainActivity)startActivitySync(launch);
-            JieliSession s=((RoadApp)activity.getApplication()).session;waitFor(s::connected,15000);
+            JieliSession s=((RoadApp)activity.getApplication()).session;waitFor(s::connected,15000);invoke("navigate",new Class<?>[]{int.class},0);waitFor(()->field("surface")!=null&&((SurfaceView)field("surface")).getHolder().getSurface().isValid(),5000);
             Diag.setEnabled(true);
             activity.getSharedPreferences("library",0).edit().clear().commit();
+            activity.getSharedPreferences("devices",0).edit().clear().commit();s.get("PULL_VIDEO_STATUS");
+            if(uiOnly){auditScreens();result.putString("stream","PASS: responsive UI screenshots and "+assertions+" layout assertions\n");finish(Activity.RESULT_OK,result);return;}
+            check(!s.rearAvailable(),"Rear camera controls remain hidden by default even when firmware advertises support");
             check(!s.cardPresent(),"Connected without SD card");check(s.description.optString("firmware_version").equals("SIMULATED"),"Fetched device capabilities");
             invoke("startLive",new Class<?>[]{});Field count=LiveStream.class.getDeclaredField("renderedFrames");count.setAccessible(true);waitFor(()->field("live")!=null&&count.getLong(field("live"))>15,12000);
             LiveStream stream=(LiveStream)field("live");check(count.getLong(stream)>15,"H264 live renders without SD card");
@@ -41,13 +45,16 @@ public final class SmokeTest extends Instrumentation {
             check(stream.sps()!=null&&stream.pps()!=null,"Captured H264 SPS/PPS");stream.mute(false);
             FrameAssembler assembly=(FrameAssembler)getPrivate(stream,"assembler");check(assembly.packets>15&&assembly.invalid==0,"Actual iBOX TCP framing produces complete frames without invalid packets");
             int[] aspect=new int[2];runOnMainSync(()->{try{SurfaceView v=(SurfaceView)field("surface");aspect[0]=v.getWidth();aspect[1]=v.getHeight();}catch(Exception e){throw new RuntimeException(e);}});check(Math.abs(aspect[0]/(double)aspect[1]-4.0/3)<.03,"Preview surface preserves source aspect ratio: "+aspect[0]+"x"+aspect[1]+", stream="+stream.width()+"x"+stream.height());
+            check(((LinearLayout)field("cameraBar")).getVisibility()==View.GONE,"Single-camera profile has no rear camera selector");
+            final LiveStream continuous=stream;runOnMainSync(()->{try{Field mode=MainActivity.class.getDeclaredField("controlTab");mode.setAccessible(true);for(int section=0;section<3;section++){mode.setInt(activity,section);Method render=MainActivity.class.getDeclaredMethod("renderControls");render.setAccessible(true);render.invoke(activity);}}catch(Exception e){throw new RuntimeException(e);}});check(field("live")==continuous,"Switching control sections preserves the active video surface and stream");
+            s.setRearEnabled(true);s.worker.submit(()->{}).get();check(s.rearAvailable(),"An optional second camera can be enabled for the current device profile");
             invoke("selectLiveQuality",new Class<?>[]{int.class},1);waitFor(()->field("live")!=null&&((LiveStream)field("live")).width()==1280&&count.getLong(field("live"))>8,12000);check(activity.getPreferences(0).getInt("quality.0",-1)==1,"720p selection sends request, decodes changed stream and persists preference");
             invoke("selectLiveQuality",new Class<?>[]{int.class},2);waitFor(()->field("live")!=null&&((LiveStream)field("live")).height()==1080&&count.getLong(field("live"))>8,12000);check(((LiveStream)field("live")).width()==1920,"1080p uses visible crop height instead of coded 1088");
             try(InputStream in=new URL("http://10.0.2.2:8080/test/quality/fixed").openStream()){while(in.read()!=-1){}}
             invoke("selectLiveQuality",new Class<?>[]{int.class},0);waitFor(()->field("live")!=null&&((LiveStream)field("live")).width()==1920&&count.getLong(field("live"))>8,12000);check(((LiveStream)field("live")).qualityText().contains("не применён"),"Firmware ignoring requested quality is reported using actual stream dimensions");
             try(InputStream in=new URL("http://10.0.2.2:8080/test/quality/auto").openStream()){while(in.read()!=-1){}}invoke("selectLiveQuality",new Class<?>[]{int.class},0);waitFor(()->field("live")!=null&&((LiveStream)field("live")).width()==640&&count.getLong(field("live"))>8,10000);
             invoke("stopLive",new Class<?>[]{});s.worker.submit(()->{}).get();Field cameraField=MainActivity.class.getDeclaredField("camera");cameraField.setAccessible(true);cameraField.setInt(activity,1);invoke("startLive",new Class<?>[]{});Thread.sleep(2000);check(count.getLong(field("live"))>10,"Rear TCP live starts after switching from front camera");invoke("stopLive",new Class<?>[]{});s.worker.submit(()->{}).get();cameraField.setInt(activity,0);invoke("startLive",new Class<?>[]{});Thread.sleep(1800);stream=(LiveStream)field("live");stream.mute(false);
-            final boolean[] spacing={false};runOnMainSync(()->{try{LinearLayout liveBody=(LinearLayout)field("body"),buttons=(LinearLayout)liveBody.getChildAt(3);View left=buttons.getChildAt(0),right=buttons.getChildAt(1),next=liveBody.getChildAt(4);spacing[0]=right.getLeft()-left.getRight()>=6*activity.getResources().getDisplayMetrics().density&&next.getTop()-buttons.getBottom()>=6*activity.getResources().getDisplayMetrics().density;}catch(Exception e){throw new RuntimeException(e);}});check(spacing[0],"Visible spacing separates adjacent buttons and rows");
+            final boolean[] spacing={false};runOnMainSync(()->{try{LinearLayout liveBody=(LinearLayout)field("body"),buttons=(LinearLayout)((Button)field("connectButton")).getParent();View left=buttons.getChildAt(0),right=buttons.getChildAt(1),videoView=liveBody.getChildAt(0);spacing[0]=right.getLeft()-left.getRight()>=6*activity.getResources().getDisplayMetrics().density&&videoView.getTop()==0&&buttons.getTop()>videoView.getBottom();}catch(Exception e){throw new RuntimeException(e);}});check(spacing[0],"Preview is the first content and primary controls have visible spacing");
             int before=Library.all(activity).length();invoke("snapshot",new Class<?>[]{});waitFor(()->Library.all(activity).length()>before,10000);check(true,"Live snapshot published via MediaStore");
             invoke("togglePhoneRecording",new Class<?>[]{Button.class},new Button(activity));Thread.sleep(4000);invoke("stopPhoneRecording",new Class<?>[]{});
             waitFor(()->Library.all(activity).length()>before+1,15000);JSONObject recording=Library.all(activity).getJSONObject(0);Uri recorded=Uri.parse(recording.getString("uri"));MediaExtractor extractor=new MediaExtractor();extractor.setDataSource(activity,recorded,null);
@@ -82,6 +89,13 @@ public final class SmokeTest extends Instrumentation {
             JSONArray completed=Library.all(activity);check(completed.getJSONObject(0).getString("name").equals("old.MOV")&&completed.getJSONObject(2).getString("name").equals("new.MOV"),"Whole folder queue downloads newest first despite unsorted input");
             try(android.database.Cursor cursor=activity.getContentResolver().query(Uri.parse(completed.getJSONObject(2).getString("uri")),new String[]{android.provider.MediaStore.MediaColumns.RELATIVE_PATH},null,null,null)){check(cursor!=null&&cursor.moveToFirst()&&cursor.getString(0).contains("Закреплённые"),"Pinned recordings saved to a separate phone folder");}
             waitFor(()->!TransferService.active,3000);runOnMainSync(()->{try{TransferService.enqueueBatch(activity,batch);}catch(Exception e){throw new RuntimeException(e);}});Thread.sleep(600);waitFor(()->!TransferService.active,5000);check(Library.all(activity).length()==batchBefore+3,"Repeated folder download skips existing complete originals");
+            testPlayback(s,front.get(0));
+            auditScreens();
+            s.setRearEnabled(true);s.worker.submit(()->{}).get();cameraField.setInt(activity,1);invoke("startLive",new Class<?>[]{});waitFor(()->field("live")!=null&&count.getLong(field("live"))>5,12000);
+            try(InputStream in=new URL("http://10.0.2.2:8080/test/rear/0").openStream()){while(in.read()!=-1){}}s.get("PULL_VIDEO_STATUS");waitFor(()->cameraField.getInt(activity)==0&&field("live")!=null&&count.getLong(field("live"))>5,12000);check(!s.rearAvailable(),"Removing an optional rear camera switches playback back to front");
+            invoke("stopLive",new Class<?>[]{});s.worker.submit(()->{}).get();long oldGeneration=((Number)getPrivate(s,"generation")).longValue();s.disconnect();s.connect("10.0.2.2");CtpClient reconnected=s.ctp;android.net.Network reconnectedWifi=s.network;
+            Method stale=JieliSession.class.getDeclaredMethod("notify",long.class,String.class,JSONObject.class);stale.setAccessible(true);stale.invoke(s,oldGeneration,"__DISCONNECTED",new JSONObject());check(s.connected()&&s.ctp==reconnected&&Objects.equals(s.network,reconnectedWifi),"A delayed disconnect callback cannot reset a newer session");
+            try{s.put("SYSTEM_DEFAULT",null);throw new AssertionError("Factory reset escaped guard");}catch(SecurityException expected){check(true,"Factory reset is blocked before writing to the device socket");}
             Diag.log("TEST","{\"pwd\":\"do-not-leak\"}");Diag.log("LONG TEST","BEGIN_FULL_LOG\n"+"0123456789".repeat(25000)+"\nEND_FULL_LOG");List<String> parts=Diag.copyParts(s.report());String full=String.join("",parts);check(parts.size()>1&&full.contains("BEGIN_FULL_LOG")&&full.contains("END_FULL_LOG")&&!full.contains("do-not-leak"),"Complete clipboard log splitting and password redaction");
             invoke("showLogs",new Class<?>[]{});invoke("copyLogs",new Class<?>[]{});final String[] clipboard={""};runOnMainSync(()->{android.content.ClipboardManager cb=activity.getSystemService(android.content.ClipboardManager.class);clipboard[0]=cb.getPrimaryClip().getItemAt(0).coerceToText(activity).toString();});check(clipboard[0].startsWith("Zem iBox"),"Copy logs button writes diagnostic text to clipboard");
             int savedBeforeClear=Library.all(activity).length();invoke("clearLogs",new Class<?>[]{TextView.class},new TextView(activity));s.worker.submit(()->{}).get();waitFor(()->field("clipboardParts")==null,5000);Thread.sleep(400);String cleared=String.join("",Diag.copyParts(s.report()));check(!cleared.contains("BEGIN_FULL_LOG")&&!cleared.contains("END_FULL_LOG")&&cleared.contains("Logs cleared by user"),"Clear logs removes app and Android history without replaying old native logs");check(Library.all(activity).length()==savedBeforeClear,"Clearing diagnostic logs preserves downloaded media");
@@ -91,6 +105,27 @@ public final class SmokeTest extends Instrumentation {
             result.putString("stream","PASS: "+assertions+" Android integration assertions\n");finish(Activity.RESULT_OK,result);
         }catch(Throwable e){Diag.error("INSTRUMENTATION",e);result.putString("stream","FAIL: "+e+"\n");finish(Activity.RESULT_CANCELED,result);}
     }
+    void testPlayback(JieliSession session,MediaItem source)throws Exception {
+        android.net.ConnectivityManager manager=activity.getSystemService(android.net.ConnectivityManager.class);android.net.Network bound=manager.getBoundNetworkForProcess();
+        try(WifiMediaProxy relay=new WifiMediaProxy(session.network,session.url(source.path))){
+            HttpURLConnection invalid=(HttpURLConnection)new URL(relay.address()+"/wrong").openConnection();check(invalid.getResponseCode()==404,"Playback relay rejects wrong capability paths");invalid.disconnect();
+            HttpURLConnection range=(HttpURLConnection)new URL(relay.address()).openConnection();range.setRequestProperty("Range","bytes=7-");check(range.getResponseCode()==206&&range.getHeaderField("Content-Range").startsWith("bytes 7-"),"Playback relay preserves device HTTP Range replies over Wi-Fi");try(InputStream in=range.getInputStream()){check(in.read()>=0,"Range relay provides video bytes");}range.disconnect();
+        }
+        for(String path:new String[]{source.path,"/storage/playback-test.avi"}){
+            PlayerActivity viewer=(PlayerActivity)startActivitySync(new Intent(activity,PlayerActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("uri",session.url(path).toString()).putExtra("mime",path.endsWith("avi")?"video/x-msvideo":"video/quicktime").putExtra("name",path.endsWith("avi")?"Проверка AVI / MJPEG":"Просмотр по Wi-Fi"));
+            Field player=PlayerActivity.class.getDeclaredField("player");player.setAccessible(true);waitFor(()->player.get(viewer)!=null&&((org.videolan.libvlc.MediaPlayer)player.get(viewer)).getTime()>300,15000);
+            org.videolan.libvlc.MediaPlayer vlc=(org.videolan.libvlc.MediaPlayer)player.get(viewer);check(vlc.getVideoTracksCount()>0,"Embedded VLC decodes "+(path.endsWith("avi")?"MJPEG AVI":"MOV / MP4")+" directly from DVR Wi-Fi");check(Objects.equals(bound,manager.getBoundNetworkForProcess()),"Network playback does not change process-wide network binding");
+            if(!path.endsWith("avi"))saveScreen("05-wifi-player.png");runOnMainSync(viewer::finish);Thread.sleep(400);
+        }
+    }
+    void auditScreens()throws Exception {
+        JieliSession session=((RoadApp)activity.getApplication()).session;try(InputStream in=new URL("http://10.0.2.2:8080/test/mode/tcp").openStream()){while(in.read()!=-1){}}session.description=new JSONObject(session.readText("/mnt/spiflash/res/dev_desc.txt",100000));Field controls=MainActivity.class.getDeclaredField("controlTab");controls.setAccessible(true);controls.setInt(activity,0);session.setRearEnabled(false);session.worker.submit(()->{}).get();
+        android.graphics.drawable.Drawable icon=activity.getApplicationInfo().loadIcon(activity.getPackageManager());for(int size:new int[]{48,256}){Bitmap bitmap=Bitmap.createBitmap(size,size,Bitmap.Config.ARGB_8888);icon.setBounds(0,0,size,size);icon.draw(new Canvas(bitmap));File dir=new File(activity.getExternalFilesDir(null),"ui-audit");dir.mkdirs();try(OutputStream out=new FileOutputStream(new File(dir,"icon-"+size+".png"))){bitmap.compress(Bitmap.CompressFormat.PNG,100,out);}bitmap.recycle();}
+        for(int page:new int[]{0,1,2,3}){invoke("navigate",new Class<?>[]{int.class},page);if(page==0){invoke("startLive",new Class<?>[]{});waitFor(()->field("live")!=null&&((Number)getPrivate(field("live"),"renderedFrames")).longValue()>25,12000);Thread.sleep(350);}else Thread.sleep(1100);saveScreen(new String[]{"01-camera.png","02-archive.png","03-phone.png","04-device.png"}[page]);final int[] bad={0};runOnMainSync(()->checkBounds(activity.getWindow().getDecorView(),bad));check(bad[0]==0,"Visible action controls fit the viewport on page "+page);}
+        invoke("navigate",new Class<?>[]{int.class},0);
+    }
+    void checkBounds(View view,int[] bad){if(view.getVisibility()!=View.VISIBLE||!view.isShown())return;if(view instanceof Button){android.graphics.Rect visible=new android.graphics.Rect();if(view.getGlobalVisibleRect(visible)&&visible.width()<view.getWidth()-2)bad[0]++;}if(view instanceof android.view.ViewGroup group)for(int i=0;i<group.getChildCount();i++)checkBounds(group.getChildAt(i),bad);}
+    void saveScreen(String name)throws Exception {Bitmap bitmap=getUiAutomation().takeScreenshot();File dir=new File(activity.getExternalFilesDir(null),"ui-audit");dir.mkdirs();try(OutputStream out=new FileOutputStream(new File(dir,name))){bitmap.compress(Bitmap.CompressFormat.PNG,100,out);}bitmap.recycle();}
     Object getPrivate(Object target,String name)throws Exception{Field f=target.getClass().getDeclaredField(name);f.setAccessible(true);return f.get(target);}
     Map<String,Long> logSizes(File dir){Map<String,Long> result=new TreeMap<>();for(File f:Objects.requireNonNull(dir.listFiles()))result.put(f.getName(),f.length());return result;}
 }

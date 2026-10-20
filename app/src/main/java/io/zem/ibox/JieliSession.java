@@ -27,27 +27,30 @@ public final class JieliSession {
     private final ScheduledExecutorService timer=Executors.newSingleThreadScheduledExecutor();
     private volatile int heartbeatMs=2000;
     private volatile long lastHeartbeat;
+    private final Set<String> unsupported=ConcurrentHashMap.newKeySet();
+    private final Object sessionLock=new Object();
+    private long generation;
     public JieliSession(Context c){
         cm=c.getSystemService(ConnectivityManager.class);
         permissionContext=c.getApplicationContext();
         networkAllowed=c.checkSelfPermission("android.permission.INTERNET")==android.content.pm.PackageManager.PERMISSION_GRANTED&&c.checkSelfPermission("android.permission.ACCESS_NETWORK_STATE")==android.content.pm.PackageManager.PERMISSION_GRANTED;
         if(c.checkSelfPermission("android.permission.ACCESS_NETWORK_STATE")!=android.content.pm.PackageManager.PERMISSION_GRANTED)return;
-        if(!networkAllowed){status="Тест C · разрешения не объявлены";return;}
+        if(!networkAllowed){status="Недоступны разрешения для подключения";return;}
         NetworkRequest req=new NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build();
         cm.registerNetworkCallback(req,new ConnectivityManager.NetworkCallback(){
             public void onAvailable(Network n){Diag.log("NETWORK","Wi-Fi available "+n);changed();}
             public void onCapabilitiesChanged(Network n,NetworkCapabilities caps){Diag.log("NETWORK",n+" "+caps);}
             public void onLinkPropertiesChanged(Network n,LinkProperties lp){Diag.log("NETWORK",n+" "+lp);}
-            public void onLost(Network n){Diag.log("NETWORK","Wi-Fi lost "+n);if(n.equals(network)){disconnect();status="Соединение Wi-Fi потеряно";changed();}}
+            public void onLost(Network n){Diag.log("NETWORK","Wi-Fi lost "+n);synchronized(sessionLock){if(n.equals(network)){disconnect();status="Соединение Wi-Fi потеряно";changed();}}}
         });
         timer.scheduleWithFixedDelay(()->{
             CtpClient current=ctp;
             if(current!=null&&current.isOpen()&&!connecting){
                 try{
                     long now=System.currentTimeMillis();
-                    if(now-current.lastRx()>30000){Diag.log("CTP","No replies for 30s");disconnect();status="Регистратор перестал отвечать";changed();return;}
+                    if(now-current.lastRx()>30000){Diag.log("CTP","No replies for 30s");disconnectCurrent(current,"Регистратор перестал отвечать");return;}
                     if(now-lastHeartbeat>=heartbeatMs){lastHeartbeat=now;current.send("CTP_KEEP_ALIVE","PUT",null);}
-                }catch(Exception e){Diag.error("Heartbeat",e);disconnect();}
+                }catch(Exception e){Diag.error("Heartbeat",e);disconnectCurrent(current,"Регистратор отключился");}
             }
         },500,500,TimeUnit.MILLISECONDS);
     }
@@ -55,39 +58,50 @@ public final class JieliSession {
     public void unlisten(Runnable r){listeners.remove(r);}
     public void changed(){for(Runnable r:listeners)main.post(r);}
     public boolean connected(){return ctp!=null&&ctp.isOpen()&&!connecting;}
+    public String deviceIdentity(){JSONObject id=state.get("UUID");String uuid=id==null?description.optString("uuid",""):id.optString("uuid","");JSONObject ap=state.get("AP_SSID_INFO");String ssid=ap==null?"":ap.optString("ssid","");if(uuid.matches("(?i)x+|0+"))uuid="";String model=description.optString("product_type","");return !uuid.isBlank()?"uuid:"+uuid+"|"+model:!ssid.isBlank()?"ssid:"+ssid+"|"+model:"host:"+host+"|"+model;}
+    public String deviceName(){JSONObject ap=state.get("AP_SSID_INFO");String name=ap==null?"":ap.optString("ssid","");return name.isBlank()?description.optString("product_type","Регистратор").replace('_',' '):name;}
+    public boolean rearEnabled(){return permissionContext.getSharedPreferences("devices",0).getBoolean("rear."+deviceIdentity(),false);}
+    public boolean rearAvailable(){JSONObject st=state.get("PULL_VIDEO_STATUS");return connected()&&rearEnabled()&&(st==null||!"0".equals(st.optString("status")))&&supports("PULL_VIDEO_STATUS");}
+    public void setRearEnabled(boolean enabled){permissionContext.getSharedPreferences("devices",0).edit().putBoolean("rear."+deviceIdentity(),enabled).apply();changed();if(enabled&&connected())worker.execute(()->{try{command("PULL_VIDEO_STATUS","GET",null);}catch(Exception e){Diag.error("Rear camera status",e);}});}
+    public JSONArray supportedLevels(String key){Object value=description.opt(key);if(value instanceof JSONArray)return (JSONArray)value;if(value instanceof String)try{return new JSONArray((String)value);}catch(JSONException ignored){}return null;}
+    public boolean supports(String topic){return !unsupported.contains(topic);}
     public boolean cardPresent(){JSONObject s=state.get("SD_STATUS");return s!=null&&"1".equals(s.optString("online"));}
     public boolean cardKnown(){return state.containsKey("SD_STATUS");}
     public void connect(String override)throws Exception {
-        if(permissionContext.checkSelfPermission("android.permission.ACCESS_NETWORK_STATE")!=android.content.pm.PackageManager.PERMISSION_GRANTED)throw new IOException("В тесте C нет разрешений; подключение недоступно");
-        if(!networkAllowed)throw new IOException("В тесте C нет разрешений; подключение недоступно");
-        disconnect();connecting=true;status="Подключение…";changed();
+        if(!networkAllowed)throw new IOException("Недоступны разрешения для подключения к регистратору");
+        disconnect();final long attempt;synchronized(sessionLock){attempt=generation;connecting=true;status="Подключение…";}changed();
         try {
             Network wifi=null;
             for(Network n:cm.getAllNetworks()){NetworkCapabilities cap=cm.getNetworkCapabilities(n);if(cap!=null&&cap.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)){wifi=n;break;}}
             boolean test=BuildConfig.DEBUG&&"10.0.2.2".equals(override);
-            if(wifi==null&&!test)throw new IOException("Подключи телефон к Wi-Fi iBOX_Flash_WiFi_Dual");
-            network=wifi;String gateway="192.168.1.1";
+            if(wifi==null&&!test)throw new IOException("Подключите телефон к Wi-Fi регистратора");
+            String gateway="192.168.1.1";
             if(wifi!=null){LinkProperties lp=cm.getLinkProperties(wifi);Diag.log("CONNECT","network="+wifi+" links="+lp);if(lp!=null)for(RouteInfo r:lp.getRoutes())if(r.isDefaultRoute()&&r.getGateway() instanceof Inet4Address){gateway=r.getGateway().getHostAddress();break;}}
-            host=override==null||override.isBlank()?gateway:override.trim();validateHost(host);
-            state.clear();description=new JSONObject();
-            Socket socket=wifi==null?new Socket():wifi.getSocketFactory().createSocket();socket.setTcpNoDelay(true);socket.connect(new InetSocketAddress(host,3333),6000);
-            ctp=new CtpClient(socket,this::notify);
-            ctp.request("APP_ACCESS","PUT",params("type","0","ver","20938"),10);
-            try{description=new JSONObject(readText("/mnt/spiflash/res/dev_desc.txt",1024*1024));Diag.log("DEVICE DESC",description.toString());}catch(Exception e){Diag.error("Device description",e);}
-            connecting=false;status="Подключён к iBOX";lastHeartbeat=0;changed();
-            try{get("SD_STATUS");}catch(Exception e){Diag.error("Read SD state",e);}
-        }catch(Exception e){disconnect();status=e.getMessage();changed();throw e;}finally{connecting=false;changed();}
+            String address=override==null||override.isBlank()?gateway:override.trim();validateHost(address);
+            synchronized(sessionLock){checkAttempt(attempt);network=wifi;host=address;state.clear();unsupported.clear();description=new JSONObject();}
+            Socket socket=wifi==null?new Socket():wifi.getSocketFactory().createSocket();CtpClient client;
+            try{socket.setTcpNoDelay(true);socket.connect(new InetSocketAddress(address,3333),6000);synchronized(sessionLock){checkAttempt(attempt);client=new CtpClient(socket,(topic,value)->notify(attempt,topic,value));ctp=client;}}catch(Exception e){socket.close();throw e;}
+            client.request("APP_ACCESS","PUT",params("type","0","ver","20938"),10);
+            try{JSONObject desc=new JSONObject(readText("/mnt/spiflash/res/dev_desc.txt",1024*1024));synchronized(sessionLock){checkAttempt(attempt);description=desc;}Diag.log("DEVICE DESC",desc.toString());}catch(Exception e){Diag.error("Device description",e);}
+            synchronized(sessionLock){checkAttempt(attempt);if(!client.isOpen())throw new IOException("Регистратор отключился при подключении");connecting=false;status="Регистратор подключён";lastHeartbeat=0;}changed();
+            try{client.request("SD_STATUS","GET",null,15);}catch(Exception e){Diag.error("Read SD state",e);}
+        }catch(Exception e){synchronized(sessionLock){if(attempt==generation){disconnect();status=e.getMessage();changed();}}throw e;}
+        finally{synchronized(sessionLock){if(attempt==generation){connecting=false;changed();}}}
     }
-    private void notify(String topic,JSONObject value){
-        if(topic.equals("__DISCONNECTED")){status="Регистратор отключился";changed();return;}
+    private void checkAttempt(long attempt)throws IOException{if(attempt!=generation)throw new IOException("Подключение отменено");}
+    private void notify(long attempt,String topic,JSONObject value){
+        synchronized(sessionLock){if(attempt!=generation)return;
+        if(topic.equals("__DISCONNECTED")){disconnect();status="Регистратор отключился";changed();return;}
+        if(value.optInt("errno",0)==6)unsupported.add(topic);
         JSONObject p=value.optJSONObject("param");if(p!=null&&value.optInt("errno",0)==0)state.put(topic,p);
-        if(topic.equals("KEEP_ALIVE_INTERVAL")&&p!=null)heartbeatMs=Math.max(250,Math.min(3000,p.optInt("timeout",6000)/3));
+        if(topic.equals("KEEP_ALIVE_INTERVAL")&&p!=null)heartbeatMs=Math.max(250,Math.min(3000,p.optInt("timeout",6000)/3));}
         changed();
     }
-    public void disconnect(){CtpClient old=ctp;ctp=null;if(old!=null)old.close();network=null;status="Не подключён";Diag.log("SESSION","Disconnected");changed();}
+    public void disconnect(){CtpClient old;synchronized(sessionLock){generation++;old=ctp;ctp=null;connecting=false;network=null;status="Не подключён";}if(old!=null)old.close();Diag.log("SESSION","Disconnected");changed();}
+    private void disconnectCurrent(CtpClient current,String reason){synchronized(sessionLock){if(ctp!=current)return;disconnect();status=reason;changed();}}
     public JSONObject get(String topic)throws Exception{return command(topic,"GET",null);}
     public JSONObject put(String topic,JSONObject params)throws Exception{return command(topic,"PUT",params);}
-    public JSONObject command(String topic,String op,JSONObject params)throws Exception {CtpClient c=ctp;if(c==null)throw new IOException("Сначала подключись к регистратору");return c.request(topic,op,params,15);}
+    public JSONObject command(String topic,String op,JSONObject params)throws Exception {CtpClient c=ctp;if(c==null)throw new IOException("Сначала подключись к регистратору");try{return c.request(topic,op,params,15);}catch(CtpClient.DeviceException e){if(e.code==6){unsupported.add(topic);changed();}if(e.code==15||e.code==16){state.put("PULL_VIDEO_STATUS",params("status","0"));changed();}throw e;}}
     public static JSONObject params(String...pairs)throws JSONException {JSONObject p=new JSONObject();for(int i=0;i<pairs.length;i+=2)p.put(pairs[i],pairs[i+1]);return p;}
     static void validateHost(String host)throws IOException{
         if(!host.matches("[0-9.]+"))throw new IOException("Нужен IPv4-адрес регистратора");

@@ -7,6 +7,7 @@ VIDEO = (ROOT / 'test-clip.mp4').read_bytes()
 RAW = (ROOT / 'live.h264').read_bytes()
 PCM = (ROOT / 'audio.pcm').read_bytes()
 JPEG = (ROOT / 'frame.jpg').read_bytes()
+AVI = (ROOT / 'playback-test.avi').read_bytes()
 AUD = [m.start() for m in re.finditer(b'\x00\x00(?:\x00)?\x01\x09', RAW)]
 FRAMES = [RAW[a:b] for a,b in zip(AUD, AUD[1:]+[len(RAW)])]
 def video_frames(width):
@@ -15,7 +16,7 @@ def video_frames(width):
 SIZES={640:FRAMES,1280:video_frames(1280),1920:video_frames(1920)}
 if not FRAMES:
     raise RuntimeError('Test video must contain Annex B AUD NAL units')
-state = {'card': False, 'break_once': True, 'settings': {}, 'ctps': [], 'stream': False, 'camera': 0, 'transport': 'tcp', 'width':640, 'fixed':False}
+state = {'card': False, 'break_once': True, 'settings': {}, 'ctps': [], 'stream': False, 'camera': 0, 'transport': 'tcp', 'width':640, 'fixed':False,'rear':True}
 lock = threading.RLock()
 
 def packet(topic, obj):
@@ -54,6 +55,7 @@ def control(client):
                 reply('SD_STATUS',{'online':str(int(state['card']))})
                 reply('VIDEO_CTRL',{'status':'0'})
                 reply('VIDEO_MIC',{'mic':'1'})
+            elif topic=='PULL_VIDEO_STATUS': reply(topic,{'status':str(int(state['rear']))})
             elif topic=='CTP_KEEP_ALIVE': reply(topic)
             elif topic=='SD_STATUS': reply(topic,{'online':str(int(state['card']))})
             elif topic in ('OPEN_RT_STREAM','OPEN_PULL_RT_STREAM'):
@@ -115,13 +117,15 @@ class HTTP(BaseHTTPRequestHandler):
     def log_message(self,fmt,*args): print('HTTP',fmt%args,flush=True)
     def do_GET(self):
         if self.path=='/test/reset':
-            state['card']=False;state['break_once']=True;state['transport']='tcp';state['fixed']=False;state['width']=640;data=b'ok'
+            state['rear']=True;state['card']=False;state['break_once']=True;state['transport']='tcp';state['fixed']=False;state['width']=640;data=b'ok'
         elif self.path.startswith('/test/quality/'):
             state['fixed']=self.path.endswith('/fixed');data=b'ok'
-        elif self.path=='/test/mode/udp':
-            state['transport']='udp';data=b'ok'
+        elif self.path in ('/test/mode/udp','/test/mode/tcp'):
+            state['transport']=self.path.rsplit('/',1)[1];data=b'ok'
         elif self.path=='/test/frame.jpg':
             data=JPEG
+        elif self.path.startswith('/test/rear/'):
+            state['rear']=self.path.endswith('/1');data=b'ok'
         elif self.path.startswith('/test/card/'):
             state['card']=self.path.endswith('/1');data=b'ok'
         elif self.path.startswith('/mnt/spiflash/res/dev_desc.txt'):
@@ -130,7 +134,7 @@ class HTTP(BaseHTTPRequestHandler):
             camera=1 if 'rear' in self.path else 0
             data=json.dumps({'file_list':[{'f':f'/storage/sd0/C/DCIM/{camera}/clip.MOV','t':'20261019123456','s':len(VIDEO),'d':4,'y':2,'c':camera}]}).encode()
         elif self.path.startswith('/storage/'):
-            data=VIDEO
+            data=AVI if self.path.endswith('.avi') else VIDEO
             rng=self.headers.get('Range')
             if rng:
                 offset=int(rng.split('=')[1].split('-')[0]);self.send_response(206);self.send_header('Content-Range',f'bytes {offset}-{len(data)-1}/{len(data)}');self.send_header('Content-Length',str(len(data)-offset));self.end_headers();self.wfile.write(data[offset:]);return

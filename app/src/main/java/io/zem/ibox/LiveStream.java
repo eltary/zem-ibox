@@ -118,7 +118,7 @@ public final class LiveStream implements AutoCloseable {
     }
     public int width(){return width;}public int height(){return height;}public int sampleRate(){return sample;}
     public byte[] sps(){return sps;}public byte[] pps(){return pps;}
-    String qualityText(){return width==requestedWidth&&height==requestedHeight?"":"iBOX передаёт "+width+"×"+height+"; запрос "+requestedWidth+"×"+requestedHeight+" не применён";}
+    String qualityText(){return width==requestedWidth&&height==requestedHeight?"":"Регистратор передаёт "+width+"×"+height+"; запрос "+requestedWidth+"×"+requestedHeight+" не применён";}
     private String statusText(){if(renderedFrames==0)return frameCount==0?"Ожидание первого кадра…":"Получено кадров: "+frameCount+" · ожидание ключевого кадра";return String.format(Locale.getDefault(),"Лайв · %d×%d · %.1f кадр/с · %.1f Мбит/с",width,height,renderFps,megabits)+(qualityText().isEmpty()?"":"\n"+qualityText());}
     private String statistics(){return "packets="+assembler.packets+" receivedFrames="+frameCount+" renderedFrames="+renderedFrames+" rxFps="+receiveFps+" renderFps="+renderFps+" mbps="+megabits+" queue="+previewQueue.size()+" previewDelayMs="+previewDelayMs+" previewDropped="+previewQueue.dropped+" decoderDropped="+decoderDrops+" resyncs="+previewQueue.resyncs+" invalid="+assembler.invalid+" duplicates="+assembler.duplicates+" incomplete="+assembler.dropped+" lastFrame="+lastFrame+" lastRendered="+lastRendered;}
     private void closeSockets(){if(udp!=null)udp.close();try{if(tcp!=null)tcp.close();}catch(IOException ignored){}}

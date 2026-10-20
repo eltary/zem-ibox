@@ -39,3 +39,20 @@ Only emulator-5586 belongs to this project; never operate on other emulators.
   уже выданной сборки с кодом 5. Повторная сборка код не повышает.
 - Каждый новый выпуск записывать в `CHANGELOG.md`. Исторические версии,
   baseline, отчёты и ранее выданные APK не перенумеровывать задним числом.
+
+## UI, playback and compatibility
+
+- Keep preview at the top and use grouped control tabs; switching camera
+  control sections must preserve the active Surface and stream.
+- Rear-camera controls default to hidden. Device description quality arrays
+  do not prove physical camera presence; store the user's choice per device.
+- Device compatibility is protocol/capability based. Do not advertise untested
+  brands or full original-app parity; maintain docs/COMPATIBILITY.md.
+- DVR HTTP playback uses bundled libVLC through a private Wi-Fi-bound relay.
+  Never bind the entire process to Wi-Fi for native playback. Downloaded files
+  continue to use the system player/gallery chooser.
+- libVLC is pinned to 3.7.7. Preserve LGPL notices/source links and review any
+  native dependency change. Default release ABIs are arm64-v8a + armeabi-v7a;
+  pass -Pzem.abis=x86_64 for this project's emulator QA builds.
+- No letters (especially Z) in the launcher icon. Keep adaptive and monochrome
+  versions, and inspect the real Android icon at small size.

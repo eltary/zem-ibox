@@ -16,6 +16,7 @@ public record SettingDef(String title,String topic,String key,String[] labels,St
         s("Частота освещения","LIGHT_FRE","fre","50 Гц|60 Гц","50|60"),
         s("Отключение экрана","SCREEN_PRO","pro","Выключено|30 секунд|1 минута|2 минуты|3 минуты","0|30|60|120|180"),
         s("Автовыключение","AUTO_SHUTDOWN","aff","Выключено|1 минута|3 минуты|5 минут","0|60|180|300"),
+        s("Автовыключение","AUTO_STUTDOWN","aff","Выключено|1 минута|3 минуты|5 минут","0|60|180|300"),
         toggle("Звук кнопок","KEY_VOICE","kvo"),
         toggle("Звук включения","BOARD_VOICE","bvo"),
         s("Язык регистратора","LANGUAGE","lag","Русский|English","16|5"),

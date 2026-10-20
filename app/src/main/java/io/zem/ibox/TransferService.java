@@ -34,7 +34,7 @@ public final class TransferService extends Service {
         try(FileOutputStream out=new FileOutputStream(file)){out.write(manifest.toString().getBytes(StandardCharsets.UTF_8));}
         c.startForegroundService(new Intent(c,TransferService.class).putExtra("batch",file.getName()));
     }
-    private static String deviceKey(JieliSession s){return s.host+"|"+s.description.optString("uuid","")+"|"+s.description.optString("product_type","");}
+    private static String deviceKey(JieliSession s){return s.deviceIdentity();}
     public void onCreate(){super.onCreate();nm=getSystemService(NotificationManager.class);nm.createNotificationChannel(new NotificationChannel("downloads","Скачивание записей",NotificationManager.IMPORTANCE_LOW));}
     public synchronized int onStartCommand(Intent intent,int flags,int id){
         if(checkSelfPermission("android.permission.INTERNET")!=android.content.pm.PackageManager.PERMISSION_GRANTED){stopSelfResult(id);return START_NOT_STICKY;}

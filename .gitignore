@@ -24,3 +24,16 @@ qa/matrix-empty-build/
 *.key
 signing.properties
 **/generated/
+qa/*.aar
+qa/libvlc-classes.jar
+qa/libvlc-source*
+qa/ui-emulator*.log
+qa/ui-simulator*.log
+
+qa/ui-build.log
+qa/ui-instrumentation.log
+
+qa/ui-small-test.log
+
+qa/ui-normal-test.log
+qa/ui-release-build.log
