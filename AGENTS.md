@@ -69,3 +69,17 @@ Only emulator-5586 belongs to this project; never operate on other emulators.
   list of unrelated buttons on the live page.
 - Inspect actual Android screenshots at normal size and 320dp with font 130%.
   Visual updates must preserve stream/surface continuity and existing actions.
+
+## Usability
+
+- Give archive loading, failures, no card, empty folders and filtered results
+  distinct messages and an actionable recovery path. Ignore stale results
+  after the session/camera changes; preserve the existing list on refresh failure.
+- Every media row has a visible actions menu. Long press is only a shortcut.
+- Show elapsed time while recording to phone. Ask before user navigation,
+  quality/camera changes, fullscreen or disconnect ends that recording.
+  Lifecycle interruption still finalizes the file automatically.
+- Text action rows use wrap_content with at least 48 dp touch targets.
+  Check 320 dp at font scales 1.3 and 2.0; camera content scrolls as one page.
+- Connection help must offer Wi-Fi selection and retry without requesting
+  SSID/location permissions or creating an automatic reconnect loop.

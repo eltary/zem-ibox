@@ -36,6 +36,7 @@ public final class LiveStream implements AutoCloseable {
     public LiveStream(JieliSession session,Surface surface,int camera,int level,Listener listener){this.session=session;this.surface=surface;this.camera=camera;this.level=level;this.listener=listener;}
     public void start(){new Thread(this::run,"Live receiver").start();}
     public void mute(boolean value){muted=value;Diag.log("LIVE","mute="+value);}
+    public boolean hasVideo(){return running&&renderedFrames>0;}
     public boolean muted(){return muted;}
     private void run(){
         String open=camera==0?"OPEN_RT_STREAM":"OPEN_PULL_RT_STREAM";

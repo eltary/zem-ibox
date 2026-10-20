@@ -37,3 +37,8 @@ qa/ui-small-test.log
 
 qa/ui-normal-test.log
 qa/ui-release-build.log
+
+qa/ux-attempts/
+qa/ux-build.log
+qa/ux-integration-run.log
+qa/ux-readme-diff.txt

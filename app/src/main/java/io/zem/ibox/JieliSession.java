@@ -57,6 +57,7 @@ public final class JieliSession {
     public void listen(Runnable r){listeners.add(r);}
     public void unlisten(Runnable r){listeners.remove(r);}
     public void changed(){for(Runnable r:listeners)main.post(r);}
+    public boolean hasWifi(){if(!networkAllowed)return false;for(Network n:cm.getAllNetworks()){NetworkCapabilities cap=cm.getNetworkCapabilities(n);if(cap!=null&&cap.hasTransport(NetworkCapabilities.TRANSPORT_WIFI))return true;}return false;}
     public boolean connected(){return ctp!=null&&ctp.isOpen()&&!connecting;}
     public String deviceIdentity(){JSONObject id=state.get("UUID");String uuid=id==null?description.optString("uuid",""):id.optString("uuid","");JSONObject ap=state.get("AP_SSID_INFO");String ssid=ap==null?"":ap.optString("ssid","");if(uuid.matches("(?i)x+|0+"))uuid="";String model=description.optString("product_type","");return !uuid.isBlank()?"uuid:"+uuid+"|"+model:!ssid.isBlank()?"ssid:"+ssid+"|"+model:"host:"+host+"|"+model;}
     public String deviceName(){JSONObject ap=state.get("AP_SSID_INFO");String name=ap==null?"":ap.optString("ssid","");return name.isBlank()?description.optString("product_type","Регистратор").replace('_',' '):name;}
