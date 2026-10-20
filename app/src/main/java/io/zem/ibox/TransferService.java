@@ -22,18 +22,19 @@ public final class TransferService extends Service {
     private final AtomicInteger count=new AtomicInteger();
     private NotificationManager nm;
     private volatile int batchTotal,batchFinished,batchFailed;
-    public static void enqueue(Context c,MediaItem item)throws JSONException {
+    public static void enqueue(Context c,MediaItem item)throws JSONException,IOException {
         if(c.checkSelfPermission("android.permission.INTERNET")!=android.content.pm.PackageManager.PERMISSION_GRANTED)throw new SecurityException("В тесте C нет разрешений; скачивание недоступно");
-        Intent intent=new Intent(c,TransferService.class).putExtra("item",item.json().toString());c.startForegroundService(intent);
+        JieliSession source=requireSource();Intent intent=new Intent(c,TransferService.class).putExtra("sourceDevice",deviceKey(source)).putExtra("item",item.json().toString());c.startForegroundService(intent);
     }
     public static void enqueueBatch(Context c,List<MediaItem> source)throws Exception {
         if(c.checkSelfPermission("android.permission.INTERNET")!=android.content.pm.PackageManager.PERMISSION_GRANTED)throw new SecurityException("В тесте C нет разрешений; скачивание недоступно");
-        List<MediaItem> sorted=new ArrayList<>(source);sorted.sort(MediaItem.newestFirst());JSONArray items=new JSONArray();for(MediaItem item:sorted)items.put(item.json());
+        requireSource();List<MediaItem> sorted=new ArrayList<>(source);sorted.sort(MediaItem.newestFirst());JSONArray items=new JSONArray();for(MediaItem item:sorted)items.put(item.json());
         JieliSession s=RoadApp.instance.session;JSONObject manifest=new JSONObject().put("device",deviceKey(s)).put("items",items);
         File dir=new File(c.getFilesDir(),"batches");dir.mkdirs();File file=File.createTempFile("batch-",".json",dir);
         try(FileOutputStream out=new FileOutputStream(file)){out.write(manifest.toString().getBytes(StandardCharsets.UTF_8));}
         c.startForegroundService(new Intent(c,TransferService.class).putExtra("batch",file.getName()));
     }
+    private static JieliSession requireSource()throws IOException{JieliSession s=RoadApp.instance.session;if(!s.connected())throw new IOException("Сначала подключите видеорегистратор");if(!s.cardPresent())throw new IOException(s.cardKnown()?"В видеорегистраторе нет microSD":"Состояние microSD ещё не получено");return s;}
     private static String deviceKey(JieliSession s){return s.deviceIdentity();}
     public void onCreate(){super.onCreate();nm=getSystemService(NotificationManager.class);nm.createNotificationChannel(new NotificationChannel("downloads","Скачивание записей",NotificationManager.IMPORTANCE_LOW));}
     public synchronized int onStartCommand(Intent intent,int flags,int id){
@@ -41,7 +42,7 @@ public final class TransferService extends Service {
         if(intent!=null&&"cancel".equals(intent.getAction())){cancel=true;if(count.get()==0)stopSelf();return START_NOT_STICKY;}
         if(intent==null){stopSelf();return START_NOT_STICKY;}
         try{
-            List<MediaItem> items=new ArrayList<>();String sourceDevice=deviceKey(RoadApp.instance.session);
+            List<MediaItem> items=new ArrayList<>();String sourceDevice=intent.getStringExtra("sourceDevice");if(sourceDevice==null)sourceDevice=deviceKey(RoadApp.instance.session);
             if(intent.hasExtra("batch")){
                 File dir=new File(getFilesDir(),"batches").getCanonicalFile(),file=new File(dir,intent.getStringExtra("batch")).getCanonicalFile();if(!file.getParentFile().equals(dir))throw new IOException("Неверный манифест очереди");
                 JSONObject manifest=new JSONObject(new String(java.nio.file.Files.readAllBytes(file.toPath()),StandardCharsets.UTF_8));sourceDevice=manifest.getString("device");JSONArray a=manifest.getJSONArray("items");for(int i=0;i<a.length();i++){JSONObject j=a.getJSONObject(i);items.add(new MediaItem(j,j.optInt("c")));}file.delete();items.sort(MediaItem.newestFirst());
@@ -54,16 +55,16 @@ public final class TransferService extends Service {
             for(MediaItem item:items){
             queue.execute(()->{
                 PowerManager.WakeLock wake=getSystemService(PowerManager.class).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"Zem iBox:download");wake.acquire(6*60*60*1000L);
-                try{if(cancel)return;if(!origin.equals(deviceKey(RoadApp.instance.session)))throw new IOException("Подключён другой регистратор. Вернись к исходной сети");Diag.log("QUEUE ITEM",(batchFinished+1)+"/"+batchTotal+" "+item.time+" "+item.path);download(item);}
-                catch(Exception e){batchFailed++;Diag.error("Download "+item.path,e);if(!RoadApp.instance.session.connected()||!origin.equals(deviceKey(RoadApp.instance.session)))cancel=true;progress=e.getMessage()+". Частичная копия сохранена; скачай папку снова для продолжения.";RoadApp.instance.session.changed();if(checkSelfPermission("android.permission.POST_NOTIFICATIONS")==android.content.pm.PackageManager.PERMISSION_GRANTED)nm.notify(16,notification(progress,0,0));}
+                try{if(cancel)return;if(!origin.equals(deviceKey(RoadApp.instance.session)))throw new IOException("Подключён другой регистратор. Вернись к исходной сети");Diag.log("QUEUE ITEM",(batchFinished+1)+"/"+batchTotal+" "+item.time+" "+item.path);download(item,origin);}
+                catch(Exception e){batchFailed++;Diag.error("Download "+item.path,e);if(!RoadApp.instance.session.connected()||!RoadApp.instance.session.cardPresent()||!origin.equals(deviceKey(RoadApp.instance.session)))cancel=true;progress=e.getMessage()+". Частичная копия сохранена; скачай папку снова для продолжения.";RoadApp.instance.session.changed();if(checkSelfPermission("android.permission.POST_NOTIFICATIONS")==android.content.pm.PackageManager.PERMISSION_GRANTED)nm.notify(16,notification(progress,0,0));}
                 finally{if(wake.isHeld())wake.release();synchronized(TransferService.this){batchFinished++;if(count.decrementAndGet()==0){active=false;if(batchTotal>1)progress=cancel?"Очередь остановлена. Скачай папку снова для продолжения":batchFailed>0?"Очередь завершена · ошибок: "+batchFailed+". Повтори скачивание папки":"Папка скачана · файлов: "+batchTotal;Diag.log("QUEUE COMPLETE",progress);stopForeground(STOP_FOREGROUND_REMOVE);stopSelfResult(id);RoadApp.instance.session.changed();}}}
             });
             }
         }catch(Exception e){Diag.error("Enqueue download",e);stopSelf();}
         return START_NOT_STICKY;
     }
-    private void download(MediaItem item)throws Exception {
-        JieliSession session=RoadApp.instance.session;
+    private void download(MediaItem item,String origin)throws Exception {
+        JieliSession session=requireSource();final CtpClient owner=session.ctp;if(!origin.equals(deviceKey(session)))throw new IOException("Подключён другой видеорегистратор");
         String identity=deviceKey(session)+"\n"+item.path+"\n"+item.time+"\n"+item.size+"\nlocked="+item.locked();
         String key=Io.hex(MessageDigest.getInstance("SHA-256").digest(identity.getBytes(StandardCharsets.UTF_8)));
         if(Library.contains(this,key)){progress="Уже сохранено: "+item.name;Diag.log("QUEUE SKIP",item.path);RoadApp.instance.session.changed();return;}
@@ -75,7 +76,7 @@ public final class TransferService extends Service {
             HttpURLConnection conn=null;
             try {
                 long offset=part.length();if(expected>0&&offset>expected){try(RandomAccessFile reset=new RandomAccessFile(part,"rw")){reset.setLength(0);}offset=0;}
-                conn=session.http(item.path);if(offset>0){conn.setRequestProperty("Range","bytes="+offset+"-");Diag.log("DOWNLOAD","Resuming from "+offset);}
+                if(!session.isCurrent(owner)||!session.cardPresent())throw new IOException("Подключение или microSD недоступны. Повторите скачивание после подключения");conn=session.http(owner,item.path);if(offset>0){conn.setRequestProperty("Range","bytes="+offset+"-");Diag.log("DOWNLOAD","Resuming from "+offset);}
                 int code=conn.getResponseCode();Diag.log("DOWNLOAD HTTP",code+" "+conn.getHeaderFields());
                 if(code!=200&&code!=206)throw new IOException("HTTP "+code+" при скачивании");
                 long length=conn.getContentLengthLong();
@@ -91,16 +92,18 @@ public final class TransferService extends Service {
                     byte[] buffer=new byte[128*1024];int n;
                     while((n=in.read(buffer))!=-1){
                         if(cancel)throw new InterruptedIOException("Загрузка отменена");
+                        if(!session.isCurrent(owner)||!session.cardPresent())throw new IOException("Подключение или microSD недоступны. Частичная копия сохранена");
                         if(expected>0&&done+n>expected)throw new IOException("Получено больше данных, чем размер файла");
                         out.write(buffer,0,n);done+=n;
                         if(System.currentTimeMillis()-lastUi>500){lastUi=System.currentTimeMillis();show(item.name+" · "+bytes(done)+" / "+bytes(expected),done,expected);}
                     }
                     out.getFD().sync();
                 }
+                if(!session.isCurrent(owner)||!session.cardPresent())throw new IOException("Подключение или microSD недоступны. Частичная копия сохранена");
                 if(expected>0&&part.length()!=expected)throw new EOFException("Неполный файл: "+part.length()+" / "+expected);
                 if(part.length()==0)throw new IOException("Получен пустой файл");
                 last=null;break;
-            }catch(Exception e){last=e;Diag.error("Download attempt "+(attempt+1),e);if(cancel)throw e;if(attempt<2)Thread.sleep((attempt+1)*1000L);}
+            }catch(Exception e){last=e;Diag.error("Download attempt "+(attempt+1),e);if(cancel||!session.isCurrent(owner)||!session.cardPresent())throw e;if(attempt<2)Thread.sleep((attempt+1)*1000L);}
             finally {if(conn!=null)conn.disconnect();}
         }
         if(last!=null)throw last;

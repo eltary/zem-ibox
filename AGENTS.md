@@ -86,3 +86,12 @@ Only emulator-5586 belongs to this project; never operate on other emulators.
   Check 320 dp at font scales 1.3 and 2.0; camera content scrolls as one page.
 - Connection help must offer Wi-Fi selection and retry without requesting
   SSID/location permissions or creating an automatic reconnect loop.
+
+- Name recording destinations explicitly: «На видеорегистратор» and
+  «На телефон». Do not use the ambiguous «На карту» for DVR recording.
+
+- Gate DVR settings on the current connection and card operations on a known,
+  present microSD. Live/phone saving need video, not SD. Allow stopping an
+  existing DVR recording after SD removal. Local files and connection setup
+  stay available offline. Close obsolete device dialogs and bind queued
+  commands/file reads to their captured session before sending anything.

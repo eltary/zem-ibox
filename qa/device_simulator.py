@@ -16,7 +16,7 @@ def video_frames(width):
 SIZES={640:FRAMES,1280:video_frames(1280),1920:video_frames(1920)}
 if not FRAMES:
     raise RuntimeError('Test video must contain Annex B AUD NAL units')
-state = {'card': False, 'break_once': True, 'settings': {}, 'ctps': [], 'stream': False, 'camera': 0, 'transport': 'tcp', 'width':640, 'fixed':False,'rear':True,'list_mode':'normal'}
+state = {'card': False, 'break_once': True, 'settings': {}, 'ctps': [], 'stream': False, 'camera': 0, 'transport': 'tcp', 'width':640, 'fixed':False,'rear':True,'list_mode':'normal','commands':{}}
 lock = threading.RLock()
 
 def packet(topic, obj):
@@ -48,6 +48,8 @@ def control(client):
             topic=exact(struct.unpack('<H',exact(2))[0]).decode()
             msg=json.loads(exact(struct.unpack('<I',exact(4))[0]))
             p=msg.get('param',{})
+            with lock:
+                key=topic+' '+msg.get('op','');state['commands'][key]=state['commands'].get(key,0)+1
             print('CTP',topic,msg,flush=True)
             if topic=='APP_ACCESS':
                 reply(topic,{'type':'0','ver':'20938'})
@@ -117,7 +119,9 @@ class HTTP(BaseHTTPRequestHandler):
     def log_message(self,fmt,*args): print('HTTP',fmt%args,flush=True)
     def do_GET(self):
         if self.path=='/test/reset':
-            state['list_mode']='normal';state['rear']=True;state['card']=False;state['break_once']=True;state['transport']='tcp';state['fixed']=False;state['width']=640;data=b'ok'
+            state['commands']={};state['list_mode']='normal';state['rear']=True;state['card']=False;state['break_once']=True;state['transport']='tcp';state['fixed']=False;state['width']=640;data=b'ok'
+        elif self.path=='/test/commands':
+            with lock:data=json.dumps(state['commands']).encode()
         elif self.path.startswith('/test/list/'):
             state['list_mode']=self.path.rsplit('/',1)[1];data=b'ok'
         elif self.path.startswith('/test/quality/'):
@@ -141,6 +145,13 @@ class HTTP(BaseHTTPRequestHandler):
                 data=b'{"file_list":[]}';self.send_response(200);self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data);return
             camera=1 if 'rear' in self.path else 0
             data=json.dumps({'file_list':[{'f':f'/storage/sd0/C/DCIM/{camera}/clip.MOV','t':'20261019123456','s':len(VIDEO),'d':4,'y':2,'c':camera}]}).encode()
+        elif self.path.startswith('/storage/slow-'):
+            data=VIDEO;self.send_response(200);self.send_header('Content-Length',str(len(data)));self.end_headers()
+            try:
+                for offset in range(0,len(data),4096):
+                    self.wfile.write(data[offset:offset+4096]);self.wfile.flush();time.sleep(.15)
+            except (BrokenPipeError,ConnectionResetError):pass
+            return
         elif self.path.startswith('/storage/'):
             data=AVI if self.path.endswith('.avi') else VIDEO
             rng=self.headers.get('Range')

@@ -102,7 +102,9 @@ public final class JieliSession {
     private void disconnectCurrent(CtpClient current,String reason){synchronized(sessionLock){if(ctp!=current)return;disconnect();status=reason;changed();}}
     public JSONObject get(String topic)throws Exception{return command(topic,"GET",null);}
     public JSONObject put(String topic,JSONObject params)throws Exception{return command(topic,"PUT",params);}
-    public JSONObject command(String topic,String op,JSONObject params)throws Exception {CtpClient c=ctp;if(c==null)throw new IOException("Сначала подключись к регистратору");try{return c.request(topic,op,params,15);}catch(CtpClient.DeviceException e){if(e.code==6){unsupported.add(topic);changed();}if(e.code==15||e.code==16){state.put("PULL_VIDEO_STATUS",params("status","0"));changed();}throw e;}}
+    public boolean isCurrent(CtpClient owner){return owner!=null&&ctp==owner&&connected();}
+    public JSONObject command(String topic,String op,JSONObject params)throws Exception {return command(ctp,topic,op,params);}
+    public JSONObject command(CtpClient c,String topic,String op,JSONObject params)throws Exception {if(!isCurrent(c))throw new IOException("Подключение изменилось. Подключите видеорегистратор заново");try{return c.request(topic,op,params,15);}catch(CtpClient.DeviceException e){if(isCurrent(c)){if(e.code==6){unsupported.add(topic);changed();}if(e.code==15||e.code==16){state.put("PULL_VIDEO_STATUS",params("status","0"));changed();}}throw e;}}
     public static JSONObject params(String...pairs)throws JSONException {JSONObject p=new JSONObject();for(int i=0;i<pairs.length;i+=2)p.put(pairs[i],pairs[i+1]);return p;}
     static void validateHost(String host)throws IOException{
         if(!host.matches("[0-9.]+"))throw new IOException("Нужен IPv4-адрес регистратора");
@@ -122,17 +124,20 @@ public final class JieliSession {
         c.setConnectTimeout(6000);c.setReadTimeout(15000);c.setInstanceFollowRedirects(false);c.setRequestProperty("Accept-Encoding","identity");
         Diag.log("HTTP TX","GET "+url+" via Wi-Fi="+n);return c;
     }
-    public String readText(String path,int limit)throws Exception {
-        HttpURLConnection c=http(path);
+    public HttpURLConnection http(CtpClient owner,String path)throws Exception {synchronized(sessionLock){if(!isCurrent(owner))throw new IOException("Подключение изменилось. Повторите действие");return http(path);}}
+    public String readText(String path,int limit)throws Exception {return readText(http(path),path,limit);}
+    private String readText(HttpURLConnection c,String path,int limit)throws Exception {
         try {int code=c.getResponseCode();Diag.log("HTTP RX",code+" "+c.getHeaderFields());if(code!=200)throw new IOException("HTTP "+code+" для "+path);
             try(InputStream in=c.getInputStream();ByteArrayOutputStream out=new ByteArrayOutputStream()) {byte[] b=new byte[16384];int n;while((n=in.read(b))!=-1){if(out.size()+n>limit)throw new IOException("Слишком большой ответ регистратора");out.write(b,0,n);}String text=new String(out.toByteArray(),StandardCharsets.UTF_8);Diag.log("HTTP BODY",text);return text;}
         }finally{c.disconnect();}
     }
-    public List<MediaItem> files(int camera)throws Exception {
-        if(cardKnown()&&!cardPresent())return new ArrayList<>();
-        JSONObject reply=put(camera==0?"FORWARD_MEDIA_FILES_LIST":"BEHIND_MEDIA_FILES_LIST",params("type","1"));
+    public List<MediaItem> files(int camera)throws Exception {return files(ctp,camera);}
+    public List<MediaItem> files(CtpClient owner,int camera)throws Exception {
+        if(!isCurrent(owner))throw new IOException("Сначала подключите видеорегистратор");
+        if(!cardPresent())throw new IOException(cardKnown()?"В видеорегистраторе нет microSD":"Состояние microSD ещё не получено");
+        JSONObject reply=command(owner,camera==0?"FORWARD_MEDIA_FILES_LIST":"BEHIND_MEDIA_FILES_LIST","PUT",params("type","1"));
         if(reply.optInt("type",1)==0)return new ArrayList<>();
-        String text=readText(reply.getString("path"),16*1024*1024);
+        String path=reply.getString("path");String text=readText(http(owner,path),path,16*1024*1024);
         JSONArray a=new JSONObject(text).getJSONArray("file_list");List<MediaItem> list=new ArrayList<>();
         for(int i=0;i<a.length();i++)list.add(new MediaItem(a.getJSONObject(i),camera));
         list.sort(MediaItem.newestFirst());return list;
