@@ -1,0 +1,20 @@
+plugins { id 'com.android.application' }
+def allowDestructiveActions = providers.gradleProperty('roadlink.allowDestructiveActions').getOrElse('false').equalsIgnoreCase('true')
+android {
+    enableKotlin = false
+    namespace 'io.zem.iboxdrive'
+    compileSdk 36
+    defaultConfig {
+        applicationId 'io.zem.iboxdrive'
+        minSdk 30
+        targetSdk 36
+        versionCode 5
+        versionName '0.1.4'
+        buildConfigField 'boolean', 'ALLOW_DESTRUCTIVE_ACTIONS', allowDestructiveActions.toString()
+        testInstrumentationRunner 'io.zem.iboxdrive.SmokeTest'
+    }
+    buildFeatures { buildConfig true }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    buildTypes { release { minifyEnabled false } }
+}
+apply from: new File(System.getProperty('user.home'), 'zem-android-sign/zem-signing.gradle')

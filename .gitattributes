@@ -1,0 +1,8 @@
+baselines/** -text
+history/** -text
+*.apk binary
+*.jar binary
+*.zip binary
+*.mp4 binary
+*.h264 binary
+*.pcm binary
