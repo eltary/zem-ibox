@@ -3,7 +3,7 @@
 Work in /home/user/projects/zem-ibox under WSL. The former Windows
 project directory is retired; do not recreate or build there.
 
-Android applicationId/namespace: io.zem.iboxdrive. Display name: Zem iBox Drive.
+Android applicationId/namespace: io.zem.ibox. Display name: Zem iBox Drive.
 Use the shared owner-managed key ~/zem-android-sign/signing.properties,
 alias zem, subject/issuer CN=Zem, O=Zem, for both debug and release.
 Never generate a replacement key or commit/print the keystore/passwords.

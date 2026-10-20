@@ -1,4 +1,4 @@
-package io.zem.iboxdrive;
+package io.zem.ibox;
 
 import android.app.*;
 import android.content.*;

@@ -1,4 +1,4 @@
-package io.zem.iboxdrive;
+package io.zem.ibox;
 import java.io.*;
 import java.nio.*;
 import java.util.*;
