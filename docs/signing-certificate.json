@@ -1,8 +1,8 @@
 {
-  "subject": "CN=Zem, O=Zem",
-  "issuer": "CN=Zem, O=Zem",
+  "subject": "C=US, O=Android, CN=Android Debug",
+  "issuer": "C=US, O=Android, CN=Android Debug",
   "alias": "zem",
-  "algorithm": "RSA 4096",
-  "signatureAlgorithm": "SHA256withRSA",
-  "sha256": "6c158b0523c949f5fce34375367cadb8cee6c0391e2f9258eb6609153b41ed7f"
+  "algorithm": "2048-bit RSA key",
+  "signatureAlgorithm": "SHA1withRSA (weak)",
+  "sha256": "5188a23dcf6a08f5ae33bd7c6b6b1307b1c61910639798cc8a3235d37b745e3b"
 }

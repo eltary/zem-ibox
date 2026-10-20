@@ -4,8 +4,12 @@ Work in /home/user/projects/zem-ibox under WSL. The former Windows
 project directory is retired; do not recreate or build there.
 
 Android applicationId/namespace: io.zem.ibox. Display name: Zem iBox Drive.
-Use the shared owner-managed key ~/zem-android-sign/signing.properties,
-alias zem, subject/issuer CN=Zem, O=Zem, for both debug and release.
+Use the existing shared owner-managed key ~/zem-android-sign/signing.properties
+for both debug and release. On 20.10.2026 the user explicitly requested the
+debug certificate supplied in that directory instead of the initial Zem key.
+Pin the actual public certificate in docs/signing-certificate.json and verify
+the built APK against its SHA-256; never silently accept another signer.
+Release builds must remain non-debuggable.
 Never generate a replacement key or commit/print the keystore/passwords.
 
 Use ./gradlew for Linux builds. Android SDK is configured in ignored
@@ -18,7 +22,7 @@ Only emulator-5586 belongs to this project; never operate on other emulators.
 ## Версионирование — правило пользователя
 
 - Первая версия — `0.0.1`. По явному указанию пользователя 20.10.2026
-  нумерация Zem iBox Drive начинается заново с `0.0.1`; следующий выпуск — `0.0.2`.
+  нумерация Zem iBox Drive начинается заново с `0.0.1`, затем `0.0.2`, `0.0.3` и далее.
 - Каждый завершённый согласованный набор изменений, включая код, конфигурацию
   и документацию, повышает версию ровно на один шаг. Несколько файлов одного
   набора и промежуточные сохранения не дают отдельных повышений.

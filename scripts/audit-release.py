@@ -14,7 +14,7 @@ assert ('Zem iBox Drive '+version+' —') in (root/'README.txt').read_text()
 assert ('## '+version+' —') in (root/'CHANGELOG.md').read_text()
 signature=subprocess.check_output([str(sdk/'build-tools/36.0.0/apksigner'),'verify','--verbose','--print-certs',str(apk)],text=True)
 dn=re.search(r'certificate DN: (.+)',signature).group(1)
-assert dict(part.strip().split('=',1) for part in dn.split(','))=={'CN':'Zem','O':'Zem'}
+assert dict(part.strip().split('=',1) for part in dn.split(','))==dict(part.strip().split('=',1) for part in cert['subject'].split(','))
 assert not any(word in dn.lower() for word in ['user','redacted-user'])
 assert re.findall(r'certificate SHA-256 digest: ([a-f0-9]+)',signature)==[cert['sha256']]
 xml=subprocess.check_output([str(sdk/'cmdline-tools/latest/bin/apkanalyzer'),'manifest','print',str(apk)],text=True)
