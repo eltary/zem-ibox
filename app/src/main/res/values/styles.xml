@@ -1,11 +1,28 @@
 <resources>
     <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
-        <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">#55E2BB</item>
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:colorBackground">#121F29</item>
+        <item name="android:windowAnimationStyle">@android:style/Animation.Activity</item>
+        <item name="android:colorControlHighlight">#3355DFC1</item>
+        <item name="android:colorAccent">#55DFC1</item>
+        <item name="android:alertDialogTheme">@style/ZemDialogTheme</item>
+        <item name="android:colorBackgroundFloating">#121F29</item>
+        <item name="android:colorEdgeEffect">#55DFC1</item>
         <item name="android:windowLightStatusBar">false</item>
-        <item name="android:navigationBarColor">#10161C</item>
+        <item name="android:navigationBarColor">#080F16</item>
         <item name="android:windowActionModeOverlay">true</item>
-        <item name="android:windowBackground">#10161C</item>
+        <item name="android:windowBackground">#080F16</item>
         <item name="android:windowLightNavigationBar">false</item>
+    </style>
+    <style name="ZemDialogTheme" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:colorAccent">#55DFC1</item>
+        <item name="android:textColorPrimary">#EAF4F6</item>
+        <item name="android:textColorSecondary">#8AA3B0</item>
+        <item name="android:colorBackground">#13232D</item>
+        <item name="android:windowBackground">@drawable/dialog_surface</item>
+        <item name="android:windowMinWidthMajor">90%</item>
+        <item name="android:windowMinWidthMinor">90%</item>
+        <item name="android:backgroundDimAmount">0.65</item>
     </style>
 </resources>

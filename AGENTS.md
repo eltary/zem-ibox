@@ -56,3 +56,16 @@ Only emulator-5586 belongs to this project; never operate on other emulators.
   pass -Pzem.abis=x86_64 for this project's emulator QA builds.
 - No letters (especially Z) in the launcher icon. Keep adaptive and monochrome
   versions, and inspect the real Android icon at small size.
+
+## Visual system
+
+- Use Ui.java for shared colors, native widgets, line icons, outlines,
+  typography and selection states. Keep the graphite/cyan/mint palette
+  consistent with the launcher artwork. Prefer native drawables over Unicode
+  symbols for navigation and action icons.
+- Camera preview stays first; its controls are grouped in a segmented bar.
+  Keep Android insets, readable disabled/empty states and touch targets.
+- Separate Settings into DVR and App sections. Do not recreate a long mixed
+  list of unrelated buttons on the live page.
+- Inspect actual Android screenshots at normal size and 320dp with font 130%.
+  Visual updates must preserve stream/surface continuity and existing actions.

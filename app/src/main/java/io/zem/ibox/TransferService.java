@@ -109,7 +109,7 @@ public final class TransferService extends Service {
         Diag.log("DOWNLOAD COMPLETE","source="+item.path+" bytes="+part.length()+" local-sha256="+hash);
         Library.add(this,uri,item.name,item.mime(),part.length(),item.path,key);part.delete();progress="Сохранено: "+item.name;RoadApp.instance.session.changed();
     }
-    static String bytes(long n){return n<=0?"—":String.format(Locale.getDefault(),"%.1f МБ",n/1048576.0);}
+    static String bytes(long n){if(n<=0)return "—";if(n<1024)return n+" Б";if(n<1048576)return String.format(Locale.getDefault(),"%.0f КБ",n/1024.0);if(n<1073741824)return String.format(Locale.getDefault(),"%.1f МБ",n/1048576.0);return String.format(Locale.getDefault(),"%.1f ГБ",n/1073741824.0);}
     private Notification notification(String text,long done,long total){
         PendingIntent open=PendingIntent.getActivity(this,0,new Intent(this,MainActivity.class),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
         PendingIntent stop=PendingIntent.getService(this,1,new Intent(this,TransferService.class).setAction("cancel"),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
