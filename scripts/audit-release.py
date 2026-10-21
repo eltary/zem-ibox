@@ -11,6 +11,7 @@ version_code=int(re.search(r'^\s*versionCode (\d+)\s*$',gradle,re.M).group(1))
 assert re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]?)\.(0|[1-9][0-9]?)',version)
 assert version_code>0
 assert ('Zem iBox '+version+' —') in (root/'README.txt').read_text()
+assert ('Версия '+version) in (root/'README.md').read_text()
 assert ('## '+version+' —') in (root/'CHANGELOG.md').read_text()
 signature=subprocess.check_output([str(sdk/'build-tools/36.0.0/apksigner'),'verify','--verbose','--print-certs',str(apk)],text=True)
 dn=re.search(r'certificate DN: (.+)',signature).group(1)

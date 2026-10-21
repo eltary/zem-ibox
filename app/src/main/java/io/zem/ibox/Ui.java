@@ -28,8 +28,9 @@ final class Ui {
     static void select(Button b,boolean selected){String role=b.getTag() instanceof String?(String)b.getTag():"action";b.setSelected(selected);b.setTextColor(selected&&"action".equals(role)?BG:selected?ACCENT:INK);b.setBackground(buttonBackground(b.getContext(),selected,role));}
     static void leading(Button b,String icon){b.setCompoundDrawablesRelativeWithIntrinsicBounds(icon(b.getContext(),icon,19,b.isSelected()?BG:ACCENT),null,null,null);b.setCompoundDrawablePadding(dp(b.getContext(),9));}
     static Button iconButton(Context c,String icon,String description){return new IconButton(c,icon,description);}
+    static void setIcon(Button button,String name){if(button instanceof IconButton icon){icon.glyph=icon(button.getContext(),name,22,button.isSelected()?BG:INK);button.invalidate();}}
     private static final class IconButton extends Button {
-        private final Drawable glyph;
+        private Drawable glyph;
         IconButton(Context c,String name,String description){super(c);glyph=icon(c,name,22,INK);setContentDescription(description);setMinHeight(dp(c,48));setMinWidth(0);setMinimumWidth(0);setPadding(0,0,0,0);setBackground(new RippleDrawable(ColorStateList.valueOf(0x24ffffff),panel(c,0xff12232e,16),null));setStateListAnimator(null);}
         protected void onDraw(Canvas canvas){super.onDraw(canvas);int n=dp(getContext(),22);glyph.setBounds((getWidth()-n)/2,(getHeight()-n)/2,(getWidth()+n)/2,(getHeight()+n)/2);glyph.draw(canvas);}
     }
@@ -59,6 +60,10 @@ final class Ui {
                 case "photo":box(c,3,3,21,21,3);c.drawCircle(8,8,1.5f,p);lines(c,3,17,9,12,13,16,16,13,21,18);break;
                 case "record":c.drawCircle(12,12,8,p);p.setStyle(Paint.Style.FILL);c.drawCircle(12,12,3,p);break;
                 case "play":lines(c,9,5,19,12,9,19,9,5);break;
+                case "external":lines(c,14,3,21,3,21,10);lines(c,21,3,10,14);lines(c,10,5,4,5,4,21,20,21,20,14);break;
+                case "rotate":c.drawArc(3,3,21,21,-100,280,false,p);lines(c,9,2,14,3,12,8);break;
+                case "previous":lines(c,6,5,6,19);lines(c,18,5,9,12,18,19,18,5);break;
+                case "next":lines(c,18,5,18,19);lines(c,6,5,15,12,6,19,6,5);break;
                 case "pause":lines(c,8,5,8,19);lines(c,16,5,16,19);break;
                 case "shield":lines(c,12,3,21,7,20,15,17,19,12,22,7,19,4,15,3,7,12,3);lines(c,8,12,11,15,16,9);break;
                 case "download":lines(c,12,3,12,16);lines(c,7,11,12,16,17,11);lines(c,4,17,4,21,20,21,20,17);break;

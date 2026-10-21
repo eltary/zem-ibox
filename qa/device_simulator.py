@@ -119,7 +119,9 @@ class HTTP(BaseHTTPRequestHandler):
     def log_message(self,fmt,*args): print('HTTP',fmt%args,flush=True)
     def do_GET(self):
         if self.path=='/test/reset':
-            state['commands']={};state['list_mode']='normal';state['rear']=True;state['card']=False;state['break_once']=True;state['transport']='tcp';state['fixed']=False;state['width']=640;data=b'ok'
+            state['media_requests']=0;state['commands']={};state['list_mode']='normal';state['rear']=True;state['card']=False;state['break_once']=True;state['transport']='tcp';state['fixed']=False;state['width']=640;data=b'ok'
+        elif self.path=='/test/media':
+            data=json.dumps({'requests':state.get('media_requests',0)}).encode()
         elif self.path=='/test/commands':
             with lock:data=json.dumps(state['commands']).encode()
         elif self.path.startswith('/test/list/'):
@@ -144,7 +146,9 @@ class HTTP(BaseHTTPRequestHandler):
             if mode=='empty':
                 data=b'{"file_list":[]}';self.send_response(200);self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data);return
             camera=1 if 'rear' in self.path else 0
-            data=json.dumps({'file_list':[{'f':f'/storage/sd0/C/DCIM/{camera}/clip.MOV','t':'20261019123456','s':len(VIDEO),'d':4,'y':2,'c':camera}]}).encode()
+            files=[{'f':f'/storage/sd0/C/DCIM/{camera}/clip.MOV','t':'20261019123456','s':len(VIDEO),'d':4,'y':2,'c':camera}]
+            if mode=='multi':files=[{'f':'/storage/newest.MOV','t':'20261021123000','s':len(VIDEO),'d':4,'y':1},{'f':'/storage/middle.avi','t':'20261021122000','s':len(AVI),'d':4,'y':1},{'f':'/storage/oldest.MOV','t':'20261021121000','s':len(VIDEO),'d':4,'y':2},{'f':'/storage/photo.jpg','t':'20261021120000','s':len(JPEG),'y':3}]
+            data=json.dumps({'file_list':files}).encode()
         elif self.path.startswith('/storage/slow-'):
             data=VIDEO;self.send_response(200);self.send_header('Content-Length',str(len(data)));self.end_headers()
             try:
@@ -153,10 +157,11 @@ class HTTP(BaseHTTPRequestHandler):
             except (BrokenPipeError,ConnectionResetError):pass
             return
         elif self.path.startswith('/storage/'):
-            data=AVI if self.path.endswith('.avi') else VIDEO
+            state['media_requests']=state.get('media_requests',0)+1
+            data=JPEG if self.path.endswith('.jpg') else AVI if self.path.endswith('.avi') else VIDEO
             rng=self.headers.get('Range')
             if rng:
-                offset=int(rng.split('=')[1].split('-')[0]);self.send_response(206);self.send_header('Content-Range',f'bytes {offset}-{len(data)-1}/{len(data)}');self.send_header('Content-Length',str(len(data)-offset));self.end_headers();self.wfile.write(data[offset:]);return
+                offset=int(rng.split('=')[1].split('-')[0]);end=rng.split('-',1)[1];end=min(len(data)-1,int(end) if end else len(data)-1);self.send_response(206);self.send_header('Content-Range',f'bytes {offset}-{end}/{len(data)}');self.send_header('Content-Length',str(end-offset+1));self.end_headers();self.wfile.write(data[offset:end+1]);return
             self.send_response(200);self.send_header('Content-Length',str(len(data)));self.end_headers()
             if state['break_once']:
                 state['break_once']=False;self.wfile.write(data[:8192]);self.wfile.flush();self.connection.shutdown(socket.SHUT_RDWR);self.connection.close();return

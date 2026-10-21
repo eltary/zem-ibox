@@ -102,6 +102,7 @@ public final class JieliSession {
     private void disconnectCurrent(CtpClient current,String reason){synchronized(sessionLock){if(ctp!=current)return;disconnect();status=reason;changed();}}
     public JSONObject get(String topic)throws Exception{return command(topic,"GET",null);}
     public JSONObject put(String topic,JSONObject params)throws Exception{return command(topic,"PUT",params);}
+    public long connectionId(){synchronized(sessionLock){return generation;}}
     public boolean isCurrent(CtpClient owner){return owner!=null&&ctp==owner&&connected();}
     public JSONObject command(String topic,String op,JSONObject params)throws Exception {return command(ctp,topic,op,params);}
     public JSONObject command(CtpClient c,String topic,String op,JSONObject params)throws Exception {if(!isCurrent(c))throw new IOException("Подключение изменилось. Подключите видеорегистратор заново");try{return c.request(topic,op,params,15);}catch(CtpClient.DeviceException e){if(isCurrent(c)){if(e.code==6){unsupported.add(topic);changed();}if(e.code==15||e.code==16){state.put("PULL_VIDEO_STATUS",params("status","0"));changed();}}throw e;}}

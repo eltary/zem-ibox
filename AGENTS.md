@@ -95,3 +95,12 @@ Only emulator-5586 belongs to this project; never operate on other emulators.
   existing DVR recording after SD removal. Local files and connection setup
   stay available offline. Close obsolete device dialogs and bind queued
   commands/file reads to their captured session before sending anything.
+
+- Archive/phone thumbnails load off the UI thread with bounded read/cache sizes.
+  Keep DVR reads on the captured Wi-Fi/session; pause thumbnail work while
+  the player is foreground, and ignore callbacks for recycled rows.
+- In-player previous/next/list navigation follows the filtered video snapshot,
+  excluding photos. Never pass a large archive through Intent extras. A DVR
+  queue cannot migrate to a new connection; phone queues work offline.
+- Opening a downloaded file still defaults to the Android chooser. Internal
+  sequential viewing is a separate explicit action, using content descriptors.
