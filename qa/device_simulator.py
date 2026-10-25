@@ -119,7 +119,7 @@ class HTTP(BaseHTTPRequestHandler):
     def log_message(self,fmt,*args): print('HTTP',fmt%args,flush=True)
     def do_GET(self):
         if self.path=='/test/reset':
-            state['media_requests']=0;state['commands']={};state['list_mode']='normal';state['rear']=True;state['card']=False;state['break_once']=True;state['transport']='tcp';state['fixed']=False;state['width']=640;data=b'ok'
+            state['hd_dropped']=False;state['media_requests']=0;state['commands']={};state['list_mode']='normal';state['rear']=True;state['card']=False;state['break_once']=True;state['transport']='tcp';state['fixed']=False;state['width']=640;data=b'ok'
         elif self.path=='/test/media':
             data=json.dumps({'requests':state.get('media_requests',0)}).encode()
         elif self.path=='/test/commands':
@@ -149,6 +149,32 @@ class HTTP(BaseHTTPRequestHandler):
             files=[{'f':f'/storage/sd0/C/DCIM/{camera}/clip.MOV','t':'20261019123456','s':len(VIDEO),'d':4,'y':2,'c':camera}]
             if mode=='multi':files=[{'f':'/storage/newest.MOV','t':'20261021123000','s':len(VIDEO),'d':4,'y':1},{'f':'/storage/middle.avi','t':'20261021122000','s':len(AVI),'d':4,'y':1},{'f':'/storage/oldest.MOV','t':'20261021121000','s':len(VIDEO),'d':4,'y':2},{'f':'/storage/photo.jpg','t':'20261021120000','s':len(JPEG),'y':3}]
             data=json.dumps({'file_list':files}).encode()
+        elif self.path.startswith('/storage/fullhd'):
+            path=ROOT.parent/'qa'/'playback-0.0.11'/'generated'/'fullhd.MOV'
+            if not path.is_file():self.send_error(404);return
+            total=path.stat().st_size;start=0;end=total-1;rng=self.headers.get('Range');partial=rng is not None
+            if partial:
+                bounds=rng.split('=',1)[1].split('-',1)
+                if not bounds[0]:start=max(0,total-int(bounds[1]))
+                else:start=int(bounds[0]);end=min(end,int(bounds[1]) if bounds[1] else end)
+            if '-quirks' in self.path and rng and rng.endswith('-'):
+                self.send_response(206);self.send_header('Content-Range',f'bytes {start}-{start}/{total}');self.send_header('Content-Length','0');self.end_headers();return
+            if '-quirks' in self.path:end=total-1  # Firmware ignores upper byte bound.
+            if start>=total or end<start:
+                self.send_response(416);self.send_header('Content-Range',f'bytes */{total}');self.send_header('Content-Length','0');self.end_headers();return
+            self.send_response(206 if partial else 200);self.send_header('Content-Type','video/quicktime');self.send_header('Content-Length',str(end-start+1));self.send_header('Accept-Ranges','bytes')
+            if partial:self.send_header('Content-Range',f'bytes {start}-{end}/{total}')
+            self.end_headers()
+            drop='-drop' in self.path and end-start>65536 and not state.get('hd_dropped',False)
+            if drop:state['hd_dropped']=True
+            try:
+                with path.open('rb') as file:
+                    file.seek(start);remaining=end-start+1;written=0
+                    while remaining:
+                        data=file.read(min(65536,remaining));self.wfile.write(data);self.wfile.flush();remaining-=len(data);written+=len(data)
+                        if drop and written>=65536:self.connection.shutdown(socket.SHUT_RDWR);self.connection.close();return
+            except (BrokenPipeError,ConnectionResetError):pass
+            return
         elif self.path.startswith('/storage/slow-'):
             data=VIDEO;self.send_response(200);self.send_header('Content-Length',str(len(data)));self.end_headers()
             try:

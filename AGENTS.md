@@ -104,3 +104,11 @@ Only emulator-5586 belongs to this project; never operate on other emulators.
   queue cannot migrate to a new connection; phone queues work offline.
 - Opening a downloaded file still defaults to the Android chooser. Internal
   sequential viewing is a separate explicit action, using content descriptors.
+
+- Archive playback QA must verify changing visible video pixels, not only an
+  advancing clock or a detected track. Include a long Full HD MOV with a tail
+  index, seeks and output recovery. Keep the TextureView frame watchdog bounded;
+  honour pauses/buffering and retain position/speed when changing decoder.
+- Wi-Fi playback relay validates file size/ranges, bounds upstream reads and
+  resumes read failures without repeating bytes. Consumer seek/cancellation is
+  distinct from a failed device read. Never change networks or sessions silently.

@@ -59,6 +59,12 @@ adb -s emulator-5586 install -r app/build/outputs/apk/androidTest/debug/app-debu
 adb -s emulator-5586 shell am instrument -w -e media_only true io.zem.ibox.test/io.zem.ibox.SmokeTest
 ```
 
+Для проверки больших MOV сначала выполните `bash qa/make-playback-fixture.sh`,
+затем запустите инструментальный сценарий с `-e playback_only true`.
+Файл Full HD генерируется локально в ignored `qa/playback-0.0.11/generated/`;
+138-МБ ролик не входит в APK и Git. Сценарий проверяет реальные видимые пиксели,
+перемотку, скорость, оба режима декодера, восстановление и HTTP-диапазоны.
+
 Другие флаги сценариев: `availability_only`, `ux_only`, `ui_only`.
 Без флага запускаются общие интеграционные проверки. Тестовый адрес
 `10.0.2.2` разрешён только debug-сборкой. Снимки и отчёты 0.0.10 —
