@@ -25,7 +25,7 @@ try:
             adb('logcat','-c',capture_output=True)
             args=['shell','am','instrument','-w']+([] if check=='integration' else ['-e',check,'true'])+['io.zem.ibox.test/io.zem.ibox.SmokeTest']
             result=adb(*args,capture_output=True,text=True,errors='replace',timeout=240)
-            name=f'{check}-{mode}';(OUT/(name+'.log')).write_text(result.stdout+result.stderr)
+            name=f'{check}-{mode}';(OUT/(name+'.log')).write_text((result.stdout+result.stderr).rstrip()+"\n")
             log=adb('logcat','-d',capture_output=True,text=True,errors='replace').stdout
             (OUT/(name+'-details.log')).write_text('\n'.join(line for line in log.splitlines() if 'Zem iBox/' in line or (' E VLC' in line and any(word in line for word in ['seek','decoder','deadlock'])))+'\n')
             passed='PASS:' in result.stdout and 'AssertionError' not in result.stdout and 'FAIL:' not in result.stdout
