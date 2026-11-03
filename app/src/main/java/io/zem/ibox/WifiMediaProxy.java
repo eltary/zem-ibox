@@ -54,7 +54,8 @@ final class WifiMediaProxy implements AutoCloseable {
             if(!head){byte[] buffer=new byte[64*1024];long position=start;int retries=0;
                 while(!closed&&position<=end){long chunkEnd=info.ranged?Math.min(end,position+CHUNK-1):end;HttpURLConnection conn=null;
                     try{conn=open(info.ranged?"bytes="+position+"-"+chunkEnd:null);int code=conn.getResponseCode();lastCode=code;
-                        if(info.ranged){Span actual=contentRange(conn);if(code!=206||actual.start!=position||actual.end<chunkEnd||actual.total!=info.size)throw new IOException("Device returned inconsistent video range");}
+                        if(info.ranged&&code==200&&position==0){if(conn.getContentLengthLong()!=info.size)throw new IOException("Device video changed");}
+                        else if(info.ranged){if(code!=206)throw new IOException("Device ignored nonzero video range");Span actual=contentRange(conn);if(actual.start!=position||actual.end<chunkEnd||actual.total!=info.size)throw new IOException("Device returned inconsistent video range");}
                         else if(code!=200||conn.getContentLengthLong()!=info.size)throw new IOException("Device video changed");
                         try(InputStream body=conn.getInputStream()){while(!closed&&position<=chunkEnd){int count;
                             try{count=body.read(buffer,0,(int)Math.min(buffer.length,chunkEnd-position+1));if(count<0)throw new EOFException("Truncated device video");}
@@ -74,7 +75,15 @@ final class WifiMediaProxy implements AutoCloseable {
             if(ranged){Span span=contentRange(conn);if(span.start!=0)throw new IOException("Invalid device video start");size=span.total;}
             else if(code==200)size=conn.getContentLengthLong();else throw new IOException("Device HTTP "+code);
             if(size<=0)throw new IOException("Video size unavailable");String type=conn.getContentType();if(type==null||type.contains("\r")||type.contains("\n"))type="application/octet-stream";
-            metadata=new Metadata(size,type,ranged);return metadata;
+            disconnect(conn);conn=null;
+            // Several Jieli servers answer every Range starting at zero with HTTP 200.
+            // Seeking is proved by a nonzero request, never inferred from Accept-Ranges.
+            if(!ranged&&size>1){conn=open("bytes=1-1");int probe=conn.getResponseCode();
+                if(probe==206){Span actual=contentRange(conn);ranged=actual.start==1&&actual.end>=1&&actual.total==size&&conn.getInputStream().read()>=0;}
+                Diag.log("PLAY HTTP","Nonzero range probe status="+probe+" seekable="+ranged);
+            }
+            if(!ranged)throw new IOException("Регистратор не поддерживает перемотку этого файла. Скачайте оригинал для просмотра");
+            metadata=new Metadata(size,type,true);return metadata;
         }finally{disconnect(conn);}
     }
     private static Span contentRange(HttpURLConnection conn)throws IOException{String value=conn.getHeaderField("Content-Range");Matcher match=CONTENT_RANGE.matcher(value==null?"":value);if(!match.matches())throw new IOException("Invalid device Content-Range");try{long start=Long.parseLong(match.group(1)),end=Long.parseLong(match.group(2)),total=Long.parseLong(match.group(3));if(start>end||end>=total)throw new IOException("Invalid device range bounds");return new Span(start,end,total);}catch(NumberFormatException e){throw new IOException("Invalid device range number",e);}}

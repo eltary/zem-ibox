@@ -27,9 +27,10 @@ public final class LiveStream implements AutoCloseable {
     private volatile long renderedFrames,lastRendered,decoderDrops,previewDelayMs;
     private volatile double receiveFps,renderFps,megabits;
     private final FrameAssembler assembler=new FrameAssembler();
-    private final LiveFrameQueue previewQueue=new LiveFrameQueue(8);
+    private final LiveFrameQueue previewQueue=new LiveFrameQueue(16);
     private Thread renderThread;
-    private boolean decoderNeedsKey;
+    private LiveTiming timing;
+    private boolean decoderNeedsKey;private long displayOffsetNanos;
     private final Object decodeLock=new Object();
     private final CountDownLatch stopped=new CountDownLatch(1);
     private volatile byte[] sps,pps;
@@ -48,6 +49,7 @@ public final class LiveStream implements AutoCloseable {
             int[] widths={640,1280,1920},heights={480,720,1080};requestedWidth=width=widths[level];requestedHeight=height=heights[level];
             int format=session.description.optInt("rts_type",1);
             JSONObject cameraParams=session.state.get(camera==0?"VIDEO_PARAM":"PULL_VIDEO_PARAM");int fps=cameraParams==null?25:cameraParams.optInt("fps",25);if(fps<1||fps>60)fps=25;
+            timing=new LiveTiming(fps);
             listener.status("Запуск видеопотока…");
             JSONObject reply=session.put(open,JieliSession.params("format",""+format,"w",""+width,"h",""+height,"fps",""+fps,"rate","8000"));
             width=reply.optInt("w",width);height=reply.optInt("h",height);sample=reply.optInt("rate",8000);
@@ -63,9 +65,9 @@ public final class LiveStream implements AutoCloseable {
                 for(FrameAssembler.Frame f:received){
                     if(f.type()==1){playAudio(f.data());listener.frame(f);}
                     else if(f.type()==2||f.type()==3){
-                        if(lastSeq!=-1&&(int)(f.sequence()-lastSeq)<=0)continue;lastSeq=f.sequence();
-                        boolean key=false;if(f.type()==3){NalUnits.Headers headers=NalUnits.headers(f.data());if(headers.sps()!=null)sps=headers.sps();if(headers.pps()!=null)pps=headers.pps();key=headers.key();}
-                        listener.frame(f);previewQueue.offer(f,key);frameCount++;lastFrame=System.currentTimeMillis();
+                        if(lastSeq!=-1&&(int)(f.sequence()-lastSeq)<=0)continue;long sequenceSteps=lastSeq<0?1:(int)(f.sequence()-lastSeq);lastSeq=f.sequence();
+                        boolean key=false;if(f.type()==3){NalUnits.Headers headers=NalUnits.headers(f.data());if(headers.sps()!=null){sps=headers.sps();timing.fixedRate(NalUnits.frameRate(sps));}if(headers.pps()!=null)pps=headers.pps();key=headers.key();}
+                        long pts=timing.next(System.nanoTime()/1000,sequenceSteps);FrameAssembler.Frame timed=new FrameAssembler.Frame(f.type(),f.sequence(),f.timestamp(),f.data(),pts);listener.frame(timed);previewQueue.offer(timed,key);frameCount++;lastFrame=System.currentTimeMillis();
                     }
                 }
                 long now=System.currentTimeMillis();if(now-stats>=1000){double seconds=(now-stats)/1000.0;receiveFps=(frameCount-priorFrames)/seconds;renderFps=(renderedFrames-priorRendered)/seconds;megabits=(receivedBytes-priorBytes)*8/seconds/1000000;stats=now;priorFrames=frameCount;priorRendered=renderedFrames;priorBytes=receivedBytes;if(Diag.enabled())Diag.log("LIVE STATS",statistics()+" sps="+(sps==null?0:sps.length)+" pps="+(pps==null?0:pps.length));listener.status(statusText());}
@@ -105,18 +107,23 @@ public final class LiveStream implements AutoCloseable {
                 }
                 if(decoderNeedsKey&&!key){decoderDrops++;return;}
                 if((reset||decoderNeedsKey)&&!created){decoder.flush();decoderNeedsKey=false;Diag.log("CODEC","Resumed from IDR after preview overload");}
-                drain();int i=decoder.dequeueInputBuffer(10000);
-                if(i>=0){ByteBuffer b=decoder.getInputBuffer(i);if(b.capacity()<f.data().length)throw new IOException("Кадр превышает буфер декодера");b.clear();b.put(f.data());decoder.queueInputBuffer(i,0,f.data().length,System.nanoTime()/1000,0);}else{decoderDrops++;decoderNeedsKey=true;Diag.log("CODEC","Input busy; waiting for IDR, dropped seq="+f.sequence());}
+                drain();int i=decoder.dequeueInputBuffer(0);long inputDeadline=System.nanoTime()+250_000_000L;
+                // Timed Surface output can temporarily hold codec buffers. Keep draining
+                // instead of discarding an entire GOP after a single 10ms busy result.
+                while(i<0&&running&&System.nanoTime()<inputDeadline){drain();i=decoder.dequeueInputBuffer(10000);}
+                if(!running)return;
+                if(i>=0){ByteBuffer b=decoder.getInputBuffer(i);if(b.capacity()<f.data().length)throw new IOException("Кадр превышает буфер декодера");b.clear();b.put(f.data());decoder.queueInputBuffer(i,0,f.data().length,f.presentationTimeUs()>0?f.presentationTimeUs():System.nanoTime()/1000,0);}else{decoderDrops++;decoderNeedsKey=true;Diag.log("CODEC","Input busy; waiting for IDR, dropped seq="+f.sequence());}
                 drain();
             }
         }
     }
-    private void drain(){MediaCodec.BufferInfo info=new MediaCodec.BufferInfo();for(int k=0;k<12;k++){int i=decoder.dequeueOutputBuffer(info,0);if(i>=0){decoder.releaseOutputBuffer(i,System.nanoTime());renderedFrames++;lastRendered=System.currentTimeMillis();}else if(i==MediaCodec.INFO_OUTPUT_FORMAT_CHANGED){MediaFormat fmt=decoder.getOutputFormat();int codedWidth=fmt.getInteger(MediaFormat.KEY_WIDTH,width),codedHeight=fmt.getInteger(MediaFormat.KEY_HEIGHT,height);width=fmt.containsKey("crop-right")?fmt.getInteger("crop-right")-fmt.getInteger("crop-left",0)+1:codedWidth;height=fmt.containsKey("crop-bottom")?fmt.getInteger("crop-bottom")-fmt.getInteger("crop-top",0)+1:codedHeight;decoder.setVideoScalingMode(MediaCodec.VIDEO_SCALING_MODE_SCALE_TO_FIT);Diag.log("CODEC FORMAT",fmt.toString());Diag.log("LIVE QUALITY","requested="+requestedWidth+"x"+requestedHeight+" actual="+width+"x"+height+" coded="+codedWidth+"x"+codedHeight);}else break;}}
+    private void drain(){MediaCodec.BufferInfo info=new MediaCodec.BufferInfo();for(int k=0;k<12;k++){int i=decoder.dequeueOutputBuffer(info,0);if(i>=0){long now=System.nanoTime(),target=info.presentationTimeUs*1000+displayOffsetNanos;if(target<now-80_000_000L||target>now+400_000_000L){displayOffsetNanos+=now+160_000_000L-target;target=now+160_000_000L;}decoder.releaseOutputBuffer(i,Math.max(now,target));renderedFrames++;lastRendered=System.currentTimeMillis();}else if(i==MediaCodec.INFO_OUTPUT_FORMAT_CHANGED){MediaFormat fmt=decoder.getOutputFormat();int codedWidth=fmt.getInteger(MediaFormat.KEY_WIDTH,width),codedHeight=fmt.getInteger(MediaFormat.KEY_HEIGHT,height);width=fmt.containsKey("crop-right")?fmt.getInteger("crop-right")-fmt.getInteger("crop-left",0)+1:codedWidth;height=fmt.containsKey("crop-bottom")?fmt.getInteger("crop-bottom")-fmt.getInteger("crop-top",0)+1:codedHeight;decoder.setVideoScalingMode(MediaCodec.VIDEO_SCALING_MODE_SCALE_TO_FIT);Diag.log("CODEC FORMAT",fmt.toString());Diag.log("LIVE QUALITY","requested="+requestedWidth+"x"+requestedHeight+" actual="+width+"x"+height+" coded="+codedWidth+"x"+codedHeight);}else break;}}
     private static String prefix(byte[] bytes,int max){StringBuilder hex=new StringBuilder();for(int i=0;i<Math.min(bytes.length,max);i++)hex.append(String.format(Locale.ROOT,"%02x",bytes[i]&255));return hex.toString();}
     private void playAudio(byte[] pcm){
         if(muted||pcm.length==0)return;
         try{if(audio==null){int size=Math.max(32768,AudioTrack.getMinBufferSize(sample,AudioFormat.CHANNEL_OUT_MONO,AudioFormat.ENCODING_PCM_16BIT));audio=new AudioTrack.Builder().setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MOVIE).build()).setAudioFormat(new AudioFormat.Builder().setSampleRate(sample).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build()).setBufferSizeInBytes(size).setTransferMode(AudioTrack.MODE_STREAM).build();audio.play();Diag.log("AUDIO","PCM mono 16bit rate="+sample);}audio.write(pcm,0,pcm.length,AudioTrack.WRITE_NON_BLOCKING);}catch(Exception e){Diag.error("PCM playback",e);muted=true;}
     }
+    public double frameRate(){return timing==null?25:timing.fps();}
     public int width(){return width;}public int height(){return height;}public int sampleRate(){return sample;}
     public byte[] sps(){return sps;}public byte[] pps(){return pps;}
     String qualityText(){return width==requestedWidth&&height==requestedHeight?"":"Регистратор передаёт "+width+"×"+height+"; запрос "+requestedWidth+"×"+requestedHeight+" не применён";}

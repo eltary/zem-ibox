@@ -27,6 +27,9 @@ assert application.attrib.get(ns+'debuggable','false')=='false'
 permissions=sorted(p.attrib[ns+'name'] for p in manifest.findall('uses-permission'))
 assert len(permissions)==7
 assert len(application.findall('activity'))==2 and len(application.findall('service'))==1
+providers=application.findall('provider');assert len(providers)==1
+assert providers[0].attrib[ns+'name']=='io.zem.ibox.DiagnosticProvider' and providers[0].attrib[ns+'exported']=='false' and providers[0].attrib[ns+'grantUriPermissions']=='true'
+assert providers[0].attrib[ns+'authorities']=='io.zem.ibox.diagnostics'
 def native_alignment(data):
     assert data[:4]==b'\x7fELF' and data[5]==1
     bits=64 if data[4]==2 else 32

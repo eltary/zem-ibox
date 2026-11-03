@@ -94,7 +94,9 @@ def streaming(client):
             sound=PCM[(seq%80)*800:(seq%80+1)*800]
             if sound:
                 client.sendall(struct.pack('<BBHIIII',1,0,0,seq,len(sound),0,seq*50)+sound)
-            seq+=1; time.sleep(max(0,.05-(time.monotonic()-start)))
+            seq+=1
+            if state.get('burst'):time.sleep(.2 if seq%4==0 else 0)
+            else:time.sleep(max(0,.05-(time.monotonic()-start)))
     except OSError: pass
     finally: client.close()
 
@@ -119,13 +121,15 @@ class HTTP(BaseHTTPRequestHandler):
     def log_message(self,fmt,*args): print('HTTP',fmt%args,flush=True)
     def do_GET(self):
         if self.path=='/test/reset':
-            state['hd_dropped']=False;state['media_requests']=0;state['commands']={};state['list_mode']='normal';state['rear']=True;state['card']=False;state['break_once']=True;state['transport']='tcp';state['fixed']=False;state['width']=640;data=b'ok'
+            state['burst']=False;state['hd_dropped']=False;state['media_requests']=0;state['commands']={};state['list_mode']='normal';state['rear']=True;state['card']=False;state['break_once']=True;state['transport']='tcp';state['fixed']=False;state['width']=640;data=b'ok'
         elif self.path=='/test/media':
             data=json.dumps({'requests':state.get('media_requests',0)}).encode()
         elif self.path=='/test/commands':
             with lock:data=json.dumps(state['commands']).encode()
         elif self.path.startswith('/test/list/'):
             state['list_mode']=self.path.rsplit('/',1)[1];data=b'ok'
+        elif self.path.startswith('/test/burst/'):
+            state['burst']=self.path.endswith('/1');data=b'ok'
         elif self.path.startswith('/test/quality/'):
             state['fixed']=self.path.endswith('/fixed');data=b'ok'
         elif self.path in ('/test/mode/udp','/test/mode/tcp'):
@@ -159,6 +163,8 @@ class HTTP(BaseHTTPRequestHandler):
                 else:start=int(bounds[0]);end=min(end,int(bounds[1]) if bounds[1] else end)
             if '-quirks' in self.path and rng and rng.endswith('-'):
                 self.send_response(206);self.send_header('Content-Range',f'bytes {start}-{start}/{total}');self.send_header('Content-Length','0');self.end_headers();return
+            if '-zero200' in self.path and start==0:partial=False;end=total-1
+            if '-norange' in self.path:partial=False;start=0;end=total-1
             if '-quirks' in self.path:end=total-1  # Firmware ignores upper byte bound.
             if start>=total or end<start:
                 self.send_response(416);self.send_header('Content-Range',f'bytes */{total}');self.send_header('Content-Length','0');self.end_headers();return
@@ -175,6 +181,8 @@ class HTTP(BaseHTTPRequestHandler):
                         if drop and written>=65536:self.connection.shutdown(socket.SHUT_RDWR);self.connection.close();return
             except (BrokenPipeError,ConnectionResetError):pass
             return
+        elif self.path.startswith('/storage/blocked-'):
+            self.send_response(200);self.send_header('Content-Length','10485760');self.end_headers();self.wfile.write(VIDEO[:4096]);self.wfile.flush();time.sleep(15);return
         elif self.path.startswith('/storage/slow-'):
             data=VIDEO;self.send_response(200);self.send_header('Content-Length',str(len(data)));self.end_headers()
             try:

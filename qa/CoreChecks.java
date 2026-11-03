@@ -50,6 +50,13 @@ public final class CoreChecks {
         var headers=NalUnits.headers(nal);check(headers.key()&&Arrays.equals(headers.sps(),new byte[]{0x67,1,2})&&Arrays.equals(headers.pps(),new byte[]{0x68,3}),"NAL metadata extracts only SPS/PPS and detects IDR");
         LiveFrameQueue queue=new LiveFrameQueue(2);FrameAssembler.Frame pframe=new FrameAssembler.Frame(3,2,0,new byte[]{1});queue.offer(pframe,false);queue.offer(pframe,false);queue.offer(pframe,false);check(queue.size()==0&&queue.dropped==3,"Preview overload clears stale H264 references");queue.offer(pframe,false);check(queue.size()==0,"Dependent H264 frames are skipped until next IDR");queue.offer(new FrameAssembler.Frame(3,9,0,new byte[]{5}),true);LiveFrameQueue.Entry resumedFrame=queue.poll(1);check(resumedFrame.key()&&resumedFrame.reset()&&resumedFrame.frame().sequence()==9,"Preview resumes at IDR after overload");
         queue.offer(new FrameAssembler.Frame(2,1,0,new byte[]{1}),false);queue.offer(new FrameAssembler.Frame(2,2,0,new byte[]{2}),false);queue.offer(new FrameAssembler.Frame(2,3,0,new byte[]{3}),false);check(queue.size()==1&&queue.poll(1).frame().sequence()==3,"JPEG preview keeps fresh frame after overload");queue.close();queue.offer(pframe,true);check(queue.size()==0,"Closed preview queue rejects frames");
-        System.out.println("PASS: "+checks+" protocol checks");
+        LiveTiming timing=new LiveTiming(20);timing.fixedRate(20);long last=0,origin=0;
+        for(int i=0;i<160;i++){long arrival=10_000_000L+(i/4)*200_000L;long time=timing.next(arrival);if(i==0)origin=time;else check(time-last==50000,"Burst arrivals retain uniform 20 fps timestamps");check(time-arrival<=400000,"Live jitter buffer stays bounded");last=time;}
+        check(last-origin==159*50000L,"Burst timeline duration follows the source cadence");long afterGap=timing.next(22_000_000L,41);check(afterGap-last>1_000_000,"Missing source frames retain a gap in the media timeline");
+        LiveTiming backlog=new LiveTiming(20);backlog.fixedRate(20);long firstTime=backlog.next(10_000_000);check(backlog.next(12_000_000)-firstTime==50000,"A TCP backlog after a long arrival pause does not add a false MP4 freeze");
+        LiveTiming measured=new LiveTiming(25);for(int i=0;i<300;i++)measured.next(30_000_000L+i*1_000_000L/30);check(Math.abs(measured.fps()-30)<.01,"Firmware ignoring requested fps is measured over a stable window");
+        LiveTiming variable=new LiveTiming(25);for(int i=0;i<200;i++)variable.next(50_000_000L+i*1_000_000L/19);check(Math.abs(variable.fps()-19)<.1,"A measured 19 fps stream is not forced to 20 fps and periodic rebuffering");
+        check(NalUnits.frameRate(HexFormat.of().parseHex("674d4029925403c0112f2a"))==0,"Real SPS without VUI does not invent a fixed source frame rate");
+        System.out.println("PASS: "+checks+" protocol and timing checks");
     }
 }

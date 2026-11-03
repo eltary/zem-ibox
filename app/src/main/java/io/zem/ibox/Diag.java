@@ -30,7 +30,7 @@ public final class Diag {
         else{enabled=true;startNativeCapture(new SimpleDateFormat("MM-dd HH:mm:ss.SSS",Locale.ROOT).format(new Date()));log("APP","Diagnostic recording enabled by user. Zem iBox "+BuildConfig.VERSION_NAME);}
     }
     private static void startNativeCapture(String since){
-        try {androidCapture=new ProcessBuilder("logcat","--pid="+android.os.Process.myPid(),"-b","main","-b","crash","-v","threadtime","-T",since,"-f",new File(dir,"android.log").getPath(),"-r","2048","-n","4").start();}
+        try {androidCapture=new ProcessBuilder("logcat","--pid="+android.os.Process.myPid(),"-b","main","-b","crash","-v","threadtime","-T",since,"-f",new File(dir,"android.log").getPath(),"-r","2048","-n","4","*:W","CCodec:I","MPEG4Writer:I").start();}
         catch(Exception e){error("Native Android log capture unavailable",e);}
     }
     private static void stopNativeCapture()throws IOException {
@@ -73,7 +73,7 @@ public final class Diag {
         StringBuilder text=new StringBuilder(redact(state)).append('\n');
         for(int i=9;i>=0;i--){File f=new File(dir,i==0?"roadlink.log":"roadlink."+i+".log");if(f.isFile())text.append(new String(java.nio.file.Files.readAllBytes(f.toPath()),StandardCharsets.UTF_8));}
         text.append("\n=== ANDROID PROCESS / CODEC / NATIVE ERRORS ===\n");
-        for(int i=4;i>=0;i--){File f=new File(dir,i==0?"android.log":"android.log."+i);if(f.isFile())text.append(redact(new String(java.nio.file.Files.readAllBytes(f.toPath()),StandardCharsets.UTF_8)));}
+        for(int i=4;i>=0;i--){File f=new File(dir,i==0?"android.log":"android.log."+i);if(f.isFile())try(BufferedReader in=new BufferedReader(new InputStreamReader(new FileInputStream(f),StandardCharsets.UTF_8))){String line;while((line=in.readLine())!=null)if(usefulNativeLine(line))text.append(redact(line)).append('\n');}}
         List<String> pieces=new ArrayList<>();int pos=0;
         while(pos<text.length()){
             int end=Math.min(pos+100000,text.length());
@@ -81,6 +81,43 @@ public final class Diag {
             pieces.add(text.substring(pos,end));pos=end;
         }
         return pieces;
+    }
+    static boolean usefulNativeLine(String line){return !line.contains("Zem iBox/")&&line.matches(".* [IWEF] (?:VLC|MediaCodec|CCodec[^:]*|Codec2[^:]*|MPEG4Writer|BufferQueue[^:]*|GraphicsTracker|AndroidRuntime|DEBUG|libc|Audio[^:]*)\\s*:.*");}
+    /** Fits a single pasted message. The complete journal remains a separate export. */
+    public static synchronized String compact(String state)throws IOException {
+        ArrayDeque<String> events=new ArrayDeque<>();LinkedHashMap<String,String> latest=new LinkedHashMap<>();
+        int stack=0;
+        for(int i=9;i>=0;i--){File f=new File(dir,i==0?"roadlink.log":"roadlink."+i+".log");if(!f.isFile())continue;
+            String tail;try(RandomAccessFile in=new RandomAccessFile(f,"r")){in.seek(Math.max(0,in.length()-65536));byte[] bytes=new byte[(int)(in.length()-in.getFilePointer())];in.readFully(bytes);tail=new String(bytes,StandardCharsets.UTF_8);}
+            for(String line:tail.split("\n")){
+                int begin=line.indexOf(" ["),end=begin<0?-1:line.indexOf(']',begin+2);
+                if(begin<0||end<0){if(stack-->0)events.addLast(line);continue;}
+                stack=0;String tag=line.substring(begin+2,end),message=line.substring(end+1);
+                if(tag.equals("COPY")||tag.startsWith("TEST")||tag.equals("TIMING TEST")||message.contains("CTP_KEEP_ALIVE"))continue;
+                if(tag.endsWith("STATS")||tag.equals("CODEC FORMAT")||tag.equals("LIVE QUALITY")||tag.equals("DOWNLOAD HTTP")){latest.put(tag,line);continue;}
+                if(tag.equals("LIVE TCP")||tag.equals("LIVE UDP")||tag.startsWith("THUMB"))continue;
+                if(line.length()>400)line=line.substring(0,400)+"…";
+                events.addLast(line);if(tag.equals("ERROR"))stack=5;
+                while(events.size()>120)events.removeFirst();
+            }
+        }
+        String prefix="Zem iBox "+BuildConfig.VERSION_NAME+" · короткий отчёт\n"+redact(state)+"\nПоследние ключевые события; полный журнал доступен файлом.\n";
+        if(prefix.length()>3500)prefix=prefix.substring(0,3500)+"\n";
+        LinkedHashMap<String,String> nativeErrors=new LinkedHashMap<>();
+        for(int i=4;i>=0;i--){File f=new File(dir,i==0?"android.log":"android.log."+i);if(!f.isFile())continue;
+            try(RandomAccessFile in=new RandomAccessFile(f,"r")){in.seek(Math.max(0,in.length()-24576));byte[] bytes=new byte[(int)(in.length()-in.getFilePointer())];in.readFully(bytes);for(String line:new String(bytes,StandardCharsets.UTF_8).split("\n"))if(usefulNativeLine(line)&&line.matches(".* [WEF] .*")){int start=line.indexOf(" E ");if(start<0)start=line.indexOf(" W ");if(start<0)start=line.indexOf(" F ");int colon=line.indexOf(':',Math.max(0,start));String tag=colon>start?line.substring(start+3,colon).trim():"native";nativeErrors.put(tag,line.length()>400?line.substring(0,400):line);}}
+        }
+        String ending="\nПоследние показатели:\n"+String.join("\n",latest.values())+"\nПоследние системные ошибки:\n"+String.join("\n",nativeErrors.values());if(ending.length()>4500)ending=ending.substring(ending.length()-4500);
+        String report;
+        do{report=redact(prefix+String.join("\n",events)+ending);if(report.getBytes(StandardCharsets.UTF_8).length<=12288)break;if(events.isEmpty()){ending=ending.substring(ending.length()/2);prefix=prefix.substring(0,prefix.length()/2);}else events.removeFirst();}while(true);
+        return report;
+    }
+    public static synchronized android.net.Uri export(Context context,String state)throws IOException {
+        File folder=new File(context.getCacheDir(),"shared-diagnostics");if(!folder.isDirectory()&&!folder.mkdirs())throw new IOException("Не удалось подготовить файл логов");
+        File[] old=folder.listFiles();if(old!=null){Arrays.sort(old,Comparator.comparingLong(File::lastModified).reversed());for(int i=0;i<old.length;i++)if(i>=2||System.currentTimeMillis()-old[i].lastModified()>86400000L)old[i].delete();}
+        File file=new File(folder,"Zem-iBox-"+UUID.randomUUID()+".txt");
+        try(Writer out=new OutputStreamWriter(new FileOutputStream(file),StandardCharsets.UTF_8)){for(String part:copyParts(state))out.write(part);}
+        return new android.net.Uri.Builder().scheme("content").authority(context.getPackageName()+".diagnostics").appendPath(file.getName()).build();
     }
     public static synchronized String tail() {
         if(!new File(dir,"roadlink.log").isFile())return enabled?"Журнал пуст":"Запись логов выключена";

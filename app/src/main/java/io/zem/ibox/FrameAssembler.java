@@ -5,7 +5,9 @@ import java.util.*;
 
 /** Reassembles the 20-byte Jieli media envelope; tolerates reorder and duplicate datagrams. */
 public final class FrameAssembler {
-    public record Frame(int type,long sequence,long timestamp,byte[] data) {}
+    public record Frame(int type,long sequence,long timestamp,byte[] data,long presentationTimeUs) {
+        public Frame(int type,long sequence,long timestamp,byte[] data){this(type,sequence,timestamp,data,-1);}
+    }
     private static final int MAX=6*1024*1024;
     private static final class Part {byte[] data;BitSet seen;long created;int type;long seq,ts;Part(int size,int type,long seq,long ts){data=new byte[size];seen=new BitSet(size);created=System.nanoTime();this.type=type;this.seq=seq;this.ts=ts;}}
     private final LinkedHashMap<String,Part> pending=new LinkedHashMap<>();

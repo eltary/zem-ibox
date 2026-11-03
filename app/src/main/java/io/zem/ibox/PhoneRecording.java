@@ -13,7 +13,7 @@ import java.util.concurrent.*;
 /** Records the actual live frames, including PCM audio; independent of the recorder's SD card. */
 public final class PhoneRecording {
     private final Context context;
-    private final int width,height,rate;
+    private final int width,height,rate;private final double fps;
     private final long start=System.nanoTime();
     private final File file;
     private final ThreadPoolExecutor worker=new ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(256));
@@ -22,18 +22,19 @@ public final class PhoneRecording {
     private int mode,videoTrack=-1,audioTrack=-1;
     private MediaMuxer mp4;private MediaCodec aac,jpegEncoder;
     private boolean muxing,gotKey,audioFailed;
-    private long samples,videoFrames,lastVideoPts=-1;
+    private long samples,videoFrames,lastVideoPts=-1,videoBaseUs=-1,audioBaseUs=-1;
     private Exception failure;
     private record AudioSample(byte[] data,long pts,int flags){}
     private final List<AudioSample> audioPending=new ArrayList<>();
-    public PhoneRecording(Context c,int width,int height,int rate,byte[] sps,byte[] pps)throws Exception {
-        context=c.getApplicationContext();this.width=width;this.height=height;this.rate=rate;this.sps=sps;this.pps=pps;file=File.createTempFile("roadlink-live-",".media",c.getCacheDir());Diag.log("LIVE RECORD","Start "+width+"x"+height+" rate="+rate);
+    public PhoneRecording(Context c,int width,int height,int rate,byte[] sps,byte[] pps,double fps)throws Exception {
+        context=c.getApplicationContext();this.width=width;this.height=height;this.rate=rate;this.fps=fps;this.sps=sps;this.pps=pps;file=File.createTempFile("roadlink-live-",".media",c.getCacheDir());Diag.log("LIVE RECORD","Start "+width+"x"+height+" rate="+rate);
     }
     public synchronized void accept(FrameAssembler.Frame f){
         if(!accepting)return;
-        try{worker.execute(()->{if(failure!=null)return;try{frame(f);}catch(Exception e){failure=e;Diag.error("Live recording",e);}});}catch(RejectedExecutionException e){Diag.log("LIVE RECORD","Queue full: recording stopped to avoid a corrupted file");failure=new IOException("Телефон не успевает записывать лайв");accepting=false;}
+        long capturedUs=(f.presentationTimeUs()>0?f.presentationTimeUs():System.nanoTime()/1000)-start/1000;
+        try{worker.execute(()->{if(failure!=null)return;try{frame(f,capturedUs);}catch(Exception e){failure=e;Diag.error("Live recording",e);}});}catch(RejectedExecutionException e){Diag.log("LIVE RECORD","Queue full: recording stopped to avoid a corrupted file");failure=new IOException("Телефон не успевает записывать лайв");accepting=false;}
     }
-    private void frame(FrameAssembler.Frame f)throws Exception {
+    private void frame(FrameAssembler.Frame f,long pts)throws Exception {
         if(mode==0&&(f.type()==2||f.type()==3)){
             mode=f.type();
             {
@@ -43,20 +44,20 @@ public final class PhoneRecording {
                 catch(Exception e){Diag.error("AAC encoder unavailable",e);audioFailed=true;if(aac!=null){aac.release();aac=null;}}
             }
         }
-        long pts=(System.nanoTime()-start)/1000;
         if(mode!=2&&mode!=3)return;
         if(f.type()==1&&aac!=null){
+            if(audioBaseUs<0)audioBaseUs=Math.max(0,pts);
             drainAudio(false);int index=aac.dequeueInputBuffer(10000);
-            if(index>=0){ByteBuffer b=aac.getInputBuffer(index);b.clear();if(f.data().length>b.remaining())throw new IOException("Слишком большой аудиокадр");b.put(f.data());aac.queueInputBuffer(index,0,f.data().length,samples*1000000/rate,0);samples+=f.data().length/2;}drainAudio(false);
+            if(index>=0){ByteBuffer b=aac.getInputBuffer(index);b.clear();if(f.data().length>b.remaining())throw new IOException("Слишком большой аудиокадр");b.put(f.data());aac.queueInputBuffer(index,0,f.data().length,audioBaseUs+samples*1000000/rate,0);samples+=f.data().length/2;}drainAudio(false);
         }
         if(mode==2&&f.type()==2){encodeJpeg(f.data(),pts);drainVideo(false);}
         maybeStart(pts);
         if(f.type()==3){
             for(byte[] nal:NalUnits.split(f.data())){int n=nal[0]&31;if(n==7)sps=nal;if(n==8)pps=nal;}
-            if(videoTrack<0&&sps!=null&&pps!=null){MediaFormat fmt=MediaFormat.createVideoFormat("video/avc",width,height);fmt.setByteBuffer("csd-0",ByteBuffer.wrap(NalUnits.annex(sps)));fmt.setByteBuffer("csd-1",ByteBuffer.wrap(NalUnits.annex(pps)));videoTrack=mp4.addTrack(fmt);}
+            if(videoTrack<0&&sps!=null&&pps!=null){MediaFormat fmt=MediaFormat.createVideoFormat("video/avc",width,height);fmt.setFloat(MediaFormat.KEY_FRAME_RATE,(float)fps);fmt.setByteBuffer("csd-0",ByteBuffer.wrap(NalUnits.annex(sps)));fmt.setByteBuffer("csd-1",ByteBuffer.wrap(NalUnits.annex(pps)));videoTrack=mp4.addTrack(fmt);}
             maybeStart(pts);
             if(!muxing)return;
-            boolean key=NalUnits.key(f.data());if(!gotKey&&!key)return;gotKey=true;
+            boolean key=NalUnits.key(f.data());if(!gotKey&&!key)return;if(!gotKey){videoBaseUs=pts;gotKey=true;}pts-=videoBaseUs;
             byte[] sample=NalUnits.muxSample(f.data());if(sample.length==0)return;
             pts=Math.max(pts,lastVideoPts+1);lastVideoPts=pts;MediaCodec.BufferInfo info=new MediaCodec.BufferInfo();info.set(0,sample.length,pts,key?MediaCodec.BUFFER_FLAG_KEY_FRAME:0);mp4.writeSampleData(videoTrack,ByteBuffer.wrap(sample),info);videoFrames++;
         }
@@ -77,7 +78,7 @@ public final class PhoneRecording {
         for(int k=0;k<(ending?100:8);k++){
             int index=jpegEncoder.dequeueOutputBuffer(info,ending?10000:0);
             if(index==MediaCodec.INFO_OUTPUT_FORMAT_CHANGED){if(videoTrack<0)videoTrack=mp4.addTrack(jpegEncoder.getOutputFormat());maybeStart((System.nanoTime()-start)/1000);}
-            else if(index>=0){if(info.size>0&&(info.flags&MediaCodec.BUFFER_FLAG_CODEC_CONFIG)==0){boolean key=(info.flags&MediaCodec.BUFFER_FLAG_KEY_FRAME)!=0;if(muxing&&(gotKey||key)){gotKey=true;ByteBuffer b=jpegEncoder.getOutputBuffer(index);b.position(info.offset);b.limit(info.offset+info.size);byte[] sample=new byte[info.size];b.get(sample);MediaCodec.BufferInfo copy=new MediaCodec.BufferInfo();copy.set(0,sample.length,Math.max(info.presentationTimeUs,lastVideoPts+1),info.flags);lastVideoPts=copy.presentationTimeUs;mp4.writeSampleData(videoTrack,ByteBuffer.wrap(sample),copy);videoFrames++;}}boolean end=(info.flags&MediaCodec.BUFFER_FLAG_END_OF_STREAM)!=0;jpegEncoder.releaseOutputBuffer(index,false);if(end)break;}
+            else if(index>=0){if(info.size>0&&(info.flags&MediaCodec.BUFFER_FLAG_CODEC_CONFIG)==0){boolean key=(info.flags&MediaCodec.BUFFER_FLAG_KEY_FRAME)!=0;if(muxing&&(gotKey||key)){ByteBuffer b=jpegEncoder.getOutputBuffer(index);b.position(info.offset);b.limit(info.offset+info.size);byte[] sample=new byte[info.size];b.get(sample);MediaCodec.BufferInfo copy=new MediaCodec.BufferInfo();if(!gotKey){videoBaseUs=info.presentationTimeUs;gotKey=true;}copy.set(0,sample.length,Math.max(info.presentationTimeUs-videoBaseUs,lastVideoPts+1),info.flags);lastVideoPts=copy.presentationTimeUs;mp4.writeSampleData(videoTrack,ByteBuffer.wrap(sample),copy);videoFrames++;}}boolean end=(info.flags&MediaCodec.BUFFER_FLAG_END_OF_STREAM)!=0;jpegEncoder.releaseOutputBuffer(index,false);if(end)break;}
             else if(!ending)break;
         }
     }
@@ -87,7 +88,7 @@ public final class PhoneRecording {
             if(audioTrack>=0)for(AudioSample a:audioPending)writeAudio(a);audioPending.clear();
         }
     }
-    private void writeAudio(AudioSample a){MediaCodec.BufferInfo i=new MediaCodec.BufferInfo();i.set(0,a.data.length,a.pts,a.flags);mp4.writeSampleData(audioTrack,ByteBuffer.wrap(a.data),i);}
+    private void writeAudio(AudioSample a){if(!gotKey||a.pts<videoBaseUs)return;MediaCodec.BufferInfo i=new MediaCodec.BufferInfo();i.set(0,a.data.length,a.pts-videoBaseUs,a.flags);mp4.writeSampleData(audioTrack,ByteBuffer.wrap(a.data),i);}
     private void drainAudio(boolean ending)throws Exception {
         if(aac==null)return;MediaCodec.BufferInfo info=new MediaCodec.BufferInfo();
         for(int k=0;k<(ending?100:8);k++){
@@ -103,7 +104,7 @@ public final class PhoneRecording {
         Future<?> closing;
         synchronized(this){accepting=false;closing=worker.submit(()->{
             try{
-                if(aac!=null){int i=aac.dequeueInputBuffer(10000);if(i>=0)aac.queueInputBuffer(i,0,0,samples*1000000/rate,MediaCodec.BUFFER_FLAG_END_OF_STREAM);drainAudio(true);}
+                if(aac!=null){int i=aac.dequeueInputBuffer(10000);if(i>=0)aac.queueInputBuffer(i,0,0,Math.max(0,audioBaseUs)+samples*1000000/rate,MediaCodec.BUFFER_FLAG_END_OF_STREAM);drainAudio(true);}
                 if(jpegEncoder!=null){int i=jpegEncoder.dequeueInputBuffer(10000);if(i>=0)jpegEncoder.queueInputBuffer(i,0,0,(System.nanoTime()-start)/1000,MediaCodec.BUFFER_FLAG_END_OF_STREAM);drainVideo(true);}
                 if(mp4!=null&&muxing)mp4.stop();
             }catch(Exception e){failure=e;Diag.error("Finalize live recording",e);}

@@ -25,4 +25,27 @@ final class NalUnits {
         for(byte[] n:split(data)){int type=n[0]&31;if(type!=1&&type!=5)continue;byte[] part=annex(n);out.write(part,0,part.length);}
         return out.toByteArray();
     }
+    static double frameRate(byte[] sps){
+        try{
+            java.io.ByteArrayOutputStream rbsp=new java.io.ByteArrayOutputStream();int zeros=0;
+            for(int i=1;i<sps.length;i++){int v=sps[i]&255;if(zeros>=2&&v==3){zeros=0;continue;}rbsp.write(v);zeros=v==0?zeros+1:0;}
+            Bits b=new Bits(rbsp.toByteArray());int profile=b.read(8);b.read(16);b.ue();int chroma=1;
+            if(Set.of(100,110,122,244,44,83,86,118,128,138,139,134,135).contains(profile)){chroma=b.ue();if(chroma==3)b.read(1);b.ue();b.ue();b.read(1);if(b.read(1)!=0)for(int i=0;i<(chroma==3?12:8);i++)if(b.read(1)!=0){int last=8,next=8;for(int j=0;j<(i<6?16:64);j++){if(next!=0)next=(last+b.se()+256)%256;last=next==0?last:next;}}}
+            b.ue();int poc=b.ue();if(poc==0)b.ue();else if(poc==1){b.read(1);b.se();b.se();int n=b.ue();if(n>256)return 0;for(int i=0;i<n;i++)b.se();}
+            b.ue();b.read(1);b.ue();b.ue();int frame=b.read(1);if(frame==0)b.read(1);b.read(1);if(b.read(1)!=0){b.ue();b.ue();b.ue();b.ue();}
+            if(b.read(1)==0)return 0;
+            if(b.read(1)!=0&&b.read(8)==255){b.read(16);b.read(16);}if(b.read(1)!=0)b.read(1);
+            if(b.read(1)!=0){b.read(3);b.read(1);if(b.read(1)!=0)b.read(24);}if(b.read(1)!=0){b.ue();b.ue();}
+            if(b.read(1)==0)return 0;long units=b.u32(),scale=b.u32();b.read(1);double fps=scale/(2.0*units);return fps>=1&&fps<=60?fps:0;
+        }catch(RuntimeException invalid){return 0;}
+    }
+    private static final class Bits {
+        final byte[] data;int bit;
+        Bits(byte[] data){this.data=data;}
+        int read(int n){if(n>31||bit+n>data.length*8)throw new IllegalArgumentException();int v=0;while(n-->0){v=(v<<1)|((data[bit/8]>>(7-bit%8))&1);bit++;}return v;}
+        long u32(){return ((long)read(16)<<16)|read(16);}
+        int ue(){int n=0;while(read(1)==0)if(++n>24)throw new IllegalArgumentException();return (1<<n)-1+(n==0?0:read(n));}
+        int se(){int n=ue();return (n&1)==0?-n/2:(n+1)/2;}
+    }
+
 }

@@ -7,4 +7,4 @@ mkdir -p "$ANDROID_AVD_HOME"
 if [[ ! -f "$ANDROID_AVD_HOME/roadlink-audit013.ini" ]]; then
   "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --name roadlink-audit013 --package 'system-images;android-35;google_apis_playstore;x86_64' --device pixel_6 <<< 'no'
 fi
-exec "$ANDROID_HOME/emulator/emulator" -avd roadlink-audit013 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader -memory 1536 -cores 2 -port 5586 -camera-back none -camera-front none
+exec "$ANDROID_HOME/emulator/emulator" -avd roadlink-audit013 -no-window -no-audio -no-boot-anim -no-snapshot -skip-adb-auth -gpu swiftshader -memory 1536 -cores 2 -port 5586 -camera-back none -camera-front none
