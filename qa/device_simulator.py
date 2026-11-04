@@ -137,11 +137,11 @@ class HTTP(BaseHTTPRequestHandler):
     def log_message(self,fmt,*args): print('HTTP',fmt%args,flush=True)
     def do_GET(self):
         if self.path=='/test/reset':
-            state['format_mode']='success';state['clock']=None;state['audio']=True;state['codec']=None;state['burst']=False;state['hd_dropped']=False;state['media_requests']=0;state['commands']={};state['list_mode']='normal';state['rear']=True;state['card']=False;state['break_once']=True;state['transport']='tcp';state['fixed']=False;state['width']=640;data=b'ok'
+            state['format_mode']='success';state['clock']=None;state['audio']=True;state['rtsp_audio']=None;state['rtsp_video_setups']=0;state['rtsp_audio_setups']=0;state['codec']=None;state['burst']=False;state['hd_dropped']=False;state['media_requests']=0;state['commands']={};state['list_mode']='normal';state['rear']=True;state['card']=False;state['break_once']=True;state['transport']='tcp';state['fixed']=False;state['width']=640;data=b'ok'
         elif self.path=='/test/media':
             data=json.dumps({'requests':state.get('media_requests',0)}).encode()
         elif self.path=='/test/commands':
-            with lock:data=json.dumps(state['commands']).encode()
+            with lock:data=json.dumps(dict(state['commands'],rtsp_video_setups=state.get('rtsp_video_setups',0),rtsp_audio_setups=state.get('rtsp_audio_setups',0))).encode()
         elif self.path.startswith('/test/list/'):
             state['list_mode']=self.path.rsplit('/',1)[1];data=b'ok'
         elif self.path.startswith('/test/clock/'):
@@ -150,7 +150,7 @@ class HTTP(BaseHTTPRequestHandler):
             import base64
             from rtsp_fixture import nals,jpeg_data
             jpeg=self.path.endswith('/jpeg');payloads=[]
-            for frame in (MOTION_JPEG[:20] if jpeg else FRAMES[:20]):
+            for frame in (MOTION_JPEG[:20] if jpeg else SIZES[1920][:20] if self.path.endswith('/h264-fhd') else FRAMES[:20]):
                 packets=[]
                 if jpeg:
                     w,h,q,scan=jpeg_data(frame);tables=q[0]+q.get(1,q[0])
@@ -165,13 +165,15 @@ class HTTP(BaseHTTPRequestHandler):
                         else:
                             for off in range(0,len(nal)-1,1198):packets.append(bytes([(nal[0]&224)|28,(nal[0]&31)|(128 if off==0 else 0)|(64 if off+1198>=len(nal)-1 else 0)])+nal[1+off:1+off+1198])
                 payloads.append([base64.b64encode(packet).decode() for packet in packets])
-            units=nals(FRAMES[0]);sps=next(n for n in units if n[0]&31==7);pps=next(n for n in units if n[0]&31==8)
+            units=nals((SIZES[1920] if self.path.endswith('/h264-fhd') else FRAMES)[0]);sps=next(n for n in units if n[0]&31==7);pps=next(n for n in units if n[0]&31==8)
             data=json.dumps({'frames':payloads,'sps':base64.b64encode(sps).decode(),'pps':base64.b64encode(pps).decode()}).encode()
         elif self.path=='/test/raw.h264':data=RAW
         elif self.path.startswith('/test/codec/'):
             state['codec']=int(self.path.rsplit('/',1)[1]);data=b'ok'
         elif self.path.startswith('/test/format/'):
             state['format_mode']=self.path.rsplit('/',1)[1];data=b'ok'
+        elif self.path.startswith('/test/rtsp-audio/'):
+            state['rtsp_audio']=self.path.endswith('/1');data=b'ok'
         elif self.path.startswith('/test/audio/'):
             state['audio']=self.path.endswith('/1');data=b'ok'
         elif self.path.startswith('/test/burst/'):

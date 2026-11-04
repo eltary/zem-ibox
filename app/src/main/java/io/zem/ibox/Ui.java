@@ -54,6 +54,7 @@ final class Ui {
                 case "folder":lines(c,3,8,3,5,10,5,12,8,21,8,21,20,3,20,3,8);break;
                 case "settings":c.drawCircle(12,12,4,p);for(int a=0;a<8;a++){double angle=a*Math.PI/4;c.drawLine(12+(float)Math.cos(angle)*8,12+(float)Math.sin(angle)*8,12+(float)Math.cos(angle)*10,12+(float)Math.sin(angle)*10,p);}c.drawCircle(12,12,8,p);break;
                 case "wifi":c.drawArc(2,4,22,23,224,92,false,p);c.drawArc(6,9,18,22,222,96,false,p);c.drawArc(10,15,14,20,220,100,false,p);p.setStyle(Paint.Style.FILL);c.drawCircle(12,21,1,p);break;
+                case "mute":lines(c,3,10,7,10,12,6,12,20,7,16,3,16,3,10);lines(c,16,9,22,15);lines(c,22,9,16,15);break;
                 case "volume":lines(c,3,10,7,10,12,6,12,20,7,16,3,16,3,10);c.drawArc(11,7,21,19,-60,120,false,p);break;
                 case "quality":box(c,3,4,21,20,3);lines(c,7,9,7,15,11,12,7,9);lines(c,15,9,18,9,18,15,15,15);break;
                 case "expand":lines(c,9,3,3,3,3,9);lines(c,15,3,21,3,21,9);lines(c,3,15,3,21,9,21);lines(c,21,15,21,21,15,21);break;

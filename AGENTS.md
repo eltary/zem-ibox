@@ -52,8 +52,8 @@ Only emulator-5586 belongs to this project; never operate on other emulators.
 - Device compatibility is protocol/capability based. Do not advertise untested
   brands or full original-app parity; maintain docs/COMPATIBILITY.md.
 - DVR HTTP playback uses bundled libVLC through a private Wi-Fi-bound relay.
-  Never bind the entire process to Wi-Fi for native playback. Downloaded files
-  continue to use the system player/gallery chooser.
+  Never bind the entire process to Wi-Fi for native playback. Phone videos open in the internal player by default;
+  the row menu retains the system chooser and external VLC.
 - libVLC is pinned to 3.7.7. Preserve LGPL notices/source links and review any
   native dependency change. Default release ABIs are arm64-v8a + armeabi-v7a;
   pass -Pzem.abis=x86_64 for this project's emulator QA builds.
@@ -105,8 +105,8 @@ Only emulator-5586 belongs to this project; never operate on other emulators.
 - In-player previous/next/list navigation follows the filtered video snapshot,
   excluding photos. Never pass a large archive through Intent extras. A DVR
   queue cannot migrate to a new connection; phone queues work offline.
-- Opening a downloaded file still defaults to the Android chooser. Internal
-  sequential viewing is a separate explicit action, using content descriptors.
+- On 04.11.2026 the user changed the phone video default to the internal
+  sequential player. The Android chooser and external VLC remain in the menu.
 
 - Archive playback QA must verify changing visible video pixels, not only an
   advancing clock or a detected track. Include a long Full HD MOV with a tail

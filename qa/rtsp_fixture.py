@@ -36,7 +36,7 @@ def start(port,frames,jpeg,pcm,state):
                 while not done.is_set():
                     if not playing.wait(.1):continue
                     begin=time.monotonic();h264='/264_pcm_rt/' in uri;channel=channels.get('trackID=0',0);stamp=frame*4500
-                    if h264:
+                    if h264 and 'trackID=0' in channels:
                         units=[n for n in nals(frames[frame%len(frames)]) if n[0]&31 in (1,5,6,7,8)]
                         for j,nal in enumerate(units):
                             if len(nal)<=1200:rtp(channel,96,nal,stamp,j==len(units)-1)
@@ -44,13 +44,13 @@ def start(port,frames,jpeg,pcm,state):
                                 body=nal[1:]
                                 for off in range(0,len(body),1198):
                                     end=off+1198>=len(body);part=bytes([(nal[0]&224)|28,(nal[0]&31)|(128 if off==0 else 0)|(64 if end else 0)])+body[off:off+1198];rtp(channel,96,part,stamp,end and j==len(units)-1)
-                    else:
+                    elif 'trackID=0' in channels:
                         width,height,quant,scan=jpgs[frame%len(jpgs)];tables=quant[0]+quant.get(1,quant[0])
                         for off in range(0,len(scan),1100):
                             payload=bytes([0])+off.to_bytes(3,'big')+bytes([1,255,width//8,height//8])
                             if off==0:payload+=bytes([0,0])+len(tables).to_bytes(2,'big')+tables
                             payload+=scan[off:off+1100];rtp(channel,26,payload,stamp,off+1100>=len(scan))
-                    if state.get('audio',True) and 'trackID=1' in channels:
+                    if (state.get('audio',True) if state.get('rtsp_audio') is None else state['rtsp_audio']) and 'trackID=1' in channels:
                         data=pcm[(frame%80)*800:(frame%80+1)*800];data=b''.join(data[i:i+2][::-1] for i in range(0,len(data),2));rtp(channels['trackID=1'],97,data,frame*400,True)
                     frame+=1;time.sleep(max(0,.05-(time.monotonic()-begin)))
             except OSError:done.set()
@@ -72,10 +72,10 @@ def start(port,frames,jpeg,pcm,state):
                     uri=target;h264='/264_pcm_rt/' in uri;payload=96 if h264 else 26
                     video=f'a=rtpmap:96 H264/90000\r\na=fmtp:96 packetization-mode=1;sprop-parameter-sets={base64.b64encode(sps).decode()},{base64.b64encode(pps).decode()}\r\n' if h264 else 'a=rtpmap:26 JPEG/90000\r\n'
                     sdp=f'v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=Zem Fixture\r\nt=0 0\r\na=control:*\r\nm=video 0 RTP/AVP {payload}\r\nc=IN IP4 0.0.0.0\r\n{video}a=control:trackID=0\r\n'
-                    if state.get('audio',True):sdp+='m=audio 0 RTP/AVP 97\r\nc=IN IP4 0.0.0.0\r\na=rtpmap:97 L16/8000/1\r\na=control:trackID=1\r\n'
+                    if (state.get('audio',True) if state.get('rtsp_audio') is None else state['rtsp_audio']):sdp+='m=audio 0 RTP/AVP 97\r\nc=IN IP4 0.0.0.0\r\na=rtpmap:97 L16/8000/1\r\na=control:trackID=1\r\n'
                     reply(cseq,f'Content-Type: application/sdp\r\nContent-Base: {target}/\r\n',sdp.encode())
                 elif method=='SETUP':
-                    transport=headers.get('transport','');match=re.search(r'interleaved=(\d+)-(\d+)',transport);channel=int(match[1]) if match else len(channels)*2;channels['trackID=1' if 'trackID=1' in target else 'trackID=0']=channel;reply(cseq,f'Session: fixture-1;timeout=30\r\nTransport: RTP/AVP/TCP;unicast;interleaved={channel}-{channel+1}\r\n')
+                    key='rtsp_audio_setups' if 'trackID=1' in target else 'rtsp_video_setups';state[key]=state.get(key,0)+1;transport=headers.get('transport','');match=re.search(r'interleaved=(\d+)-(\d+)',transport);channel=int(match[1]) if match else len(channels)*2;channels['trackID=1' if 'trackID=1' in target else 'trackID=0']=channel;reply(cseq,f'Session: fixture-1;timeout=30\r\nTransport: RTP/AVP/TCP;unicast;interleaved={channel}-{channel+1}\r\n')
                 elif method=='PLAY':reply(cseq,'Session: fixture-1\r\nRange: npt=0.000-\r\n');playing.set()
                 elif method=='TEARDOWN':reply(cseq,'Session: fixture-1\r\n');break
                 elif method=='PAUSE':playing.clear();reply(cseq,'Session: fixture-1\r\n')
