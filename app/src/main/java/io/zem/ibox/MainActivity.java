@@ -120,12 +120,16 @@ public final class MainActivity extends Activity {
     void appMenu(View anchor){PopupMenu popup=new PopupMenu(this,anchor);popup.getMenu().add("Wi-Fi регистратора");if(s.connected())popup.getMenu().add("Отключиться");popup.getMenu().add("Загрузки");popup.getMenu().add("Обновление приложения");popup.getMenu().add("Логи и диагностика");popup.getMenu().add("О приложении");popup.setOnMenuItemClickListener(item->{String label=item.getTitle().toString();if(label.startsWith("Wi-Fi"))openWifi();else if(label.equals("Отключиться"))disconnect();else if(label.equals("Загрузки"))leaveRecording(()->startActivity(new Intent(this,DownloadsActivity.class)));else if(label.equals("Обновление приложения"))showAppUpdates();else if(label.startsWith("Логи"))showLogs();else showAbout();return true;});popup.show();}
     AlertDialog aboutDialog;
     void showAbout(){
-        LinearLayout content=column();content.setPadding(dp(16),dp(4),dp(16),dp(12));
-        Button update=button("Проверить обновления",false);Ui.leading(update,"download");content.addView(update,new LinearLayout.LayoutParams(-1,-2));
-        content.addView(text("Просмотр и управление совместимыми регистраторами Jieli / DVRunning2.\n\nВозможности зависят от устройства и прошивки. Встроенный плеер использует libVLC 3.7.7 (VideoLAN).",14,INK));
-        ScrollView scroll=new ScrollView(this){protected void onMeasure(int width,int height){int cap=(int)(getResources().getDisplayMetrics().heightPixels*(getResources().getConfiguration().fontScale>1.5f?.28f:.45f));super.onMeasure(width,View.MeasureSpec.makeMeasureSpec(Math.min(View.MeasureSpec.getSize(height),cap),View.MeasureSpec.AT_MOST));}};scroll.addView(content);
-        aboutDialog=new AlertDialog.Builder(this).setTitle("Zem iBox "+BuildConfig.VERSION_NAME).setView(scroll).setPositiveButton("Закрыть",null).setNegativeButton("Репозиторий",(d,n)->openRepository()).setNeutralButton("Лицензии",(d,n)->showLicenses(false)).create();
-        update.setOnClickListener(v->{aboutDialog.dismiss();showAppUpdates();});aboutDialog.show();
+        if(aboutDialog!=null)aboutDialog.dismiss();
+        LinearLayout content=column();content.setPadding(dp(20),dp(20),dp(20),dp(12));
+        LinearLayout brand=row();ImageView logo=new ImageView(this);logo.setImageResource(R.mipmap.ic_launcher);brand.addView(logo,new LinearLayout.LayoutParams(dp(56),dp(56)));brand.addView(Ui.heading(this,"Zem iBox","Версия "+BuildConfig.VERSION_NAME),new LinearLayout.LayoutParams(0,-2,1));content.addView(brand);
+        content.addView(text("Камера, архив и записи с видеорегистратора на телефоне.",14,INK));
+        Button update=button("Проверить обновления",true);Ui.leading(update,"download");content.addView(update,new LinearLayout.LayoutParams(-1,-2));
+        content.addView(text("Неофициальное приложение для iBOX и совместимых регистраторов Jieli / DVRunning2. Возможности зависят от устройства и прошивки.",12,MUTED));
+        LinearLayout links=column();Button repository=button("Репозиторий",false);Ui.leading(repository,"external");links.addView(repository,pairParams(links));Button licenses=button("Лицензии",false);links.addView(licenses,pairParams(links));content.addView(links);content.addView(text("Видеоплеер libVLC 3.7.7 · VideoLAN",12,MUTED));
+        ScrollView scroll=new ScrollView(this){protected void onMeasure(int width,int height){int cap=(int)(getResources().getDisplayMetrics().heightPixels*.65f);super.onMeasure(width,View.MeasureSpec.makeMeasureSpec(Math.min(View.MeasureSpec.getSize(height),cap),View.MeasureSpec.AT_MOST));}};scroll.addView(content);
+        aboutDialog=new AlertDialog.Builder(this).setView(scroll).setPositiveButton("Закрыть",null).create();
+        update.setOnClickListener(v->{aboutDialog.dismiss();showAppUpdates();});repository.setOnClickListener(v->openRepository());licenses.setOnClickListener(v->{aboutDialog.dismiss();showLicenses(false);});aboutDialog.show();
     }
 
     void openRepository(){try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse("https://github.com/eltary/zem-ibox")));}catch(ActivityNotFoundException e){toast("Установите браузер для открытия репозитория");}}
@@ -386,7 +390,7 @@ public final class MainActivity extends Activity {
             });
         });
     }
-    void openRecordingsFolder(){try{Uri selected=StorageLocation.tree(this);if(selected!=null){Uri root=android.provider.DocumentsContract.buildDocumentUriUsingTree(selected,android.provider.DocumentsContract.getTreeDocumentId(selected));Intent folder=new Intent(Intent.ACTION_VIEW).setDataAndType(root,"vnd.android.document/directory").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);folder.setClipData(ClipData.newRawUri("Папка записей",root));startActivity(Intent.createChooser(folder,"Открыть папку записей"));}else startActivity(MediaOpen.folderChooser(this));}catch(Exception e){try{startActivity(new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS));}catch(Exception fallback){fail("Папка записей",fallback);}}}
+    void openRecordingsFolder(){try{startActivity(MediaOpen.folderChooser(this));}catch(Exception e){try{startActivity(new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS));}catch(Exception fallback){fail("Папка записей",fallback);}}}
 
     void copyLogs(){
         try {
