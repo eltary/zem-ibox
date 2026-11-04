@@ -45,7 +45,7 @@ public final class MainActivity extends Activity {
     private Button connectButton,copyButton,recordButton,remoteDownload;
     private SurfaceView surface;
     private AspectPreview preview;
-    private LiveStream live;
+    private LiveSource live;
     private volatile boolean wantsLive;
     private boolean sound,fullScreen,resumeLive;
     private int tab=0,camera=0,quality=0;
@@ -75,9 +75,10 @@ public final class MainActivity extends Activity {
         if(BuildConfig.DEBUG&&getIntent().hasExtra("test_host"))s.worker.execute(()->{try{s.connect(getIntent().getStringExtra("test_host"));}catch(Exception e){Diag.error("Test connect",e);}});
     }
     private MediaThumbnails thumbnails;
-    private ListView localList;
+    private ListView localList;private boolean checkingLibrary,openingLocal;private long localOpenRequest;
+    private long checkedClockConnection=-1,pendingClockConnection;private DeviceClock.Reading pendingClock;
     private void build(){
-        root.removeAllViews();localList=null;deviceActions.clear();previewActions.clear();dvrStorageHint=null;recordingStatus=null;snapshotButton=null;cameraContent=null;remoteEmptyPanel=null;remoteRetry=null;remoteRefresh=null;remoteSearch=null;remoteTypes=null;remoteNotice=null;previewPlaceholder=null;sourceBadge=null;idleTitle=null;idleHint=null;deviceLabel=null;settingViews.clear();recordButton=null;connectButton=null;audioButton=null;phoneRecordButton=null;cameraBar=null;controlBody=null;fileList=null;remoteEmpty=null;rearSwitch=null;remoteDownload=null;cardActions.clear();
+        updateThumbnailWork();root.removeAllViews();localList=null;deviceActions.clear();previewActions.clear();dvrStorageHint=null;recordingStatus=null;snapshotButton=null;cameraContent=null;remoteEmptyPanel=null;remoteRetry=null;remoteRefresh=null;remoteSearch=null;remoteTypes=null;remoteNotice=null;previewPlaceholder=null;sourceBadge=null;idleTitle=null;idleHint=null;deviceLabel=null;settingViews.clear();recordButton=null;connectButton=null;audioButton=null;phoneRecordButton=null;cameraBar=null;controlBody=null;fileList=null;remoteEmpty=null;rearSwitch=null;remoteDownload=null;cardActions.clear();
         savedBar=null;transferBar=null;transferAction=null;if(fullScreen){fullScreenPage();return;}
         LinearLayout title=row();ImageView mark=new ImageView(this);mark.setImageResource(io.zem.ibox.R.drawable.ic_launcher_art);mark.setBackground(Ui.panel(this,0xff06141d,12));mark.setClipToOutline(true);mark.setContentDescription(null);mark.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);title.addView(mark,new LinearLayout.LayoutParams(dp(38),dp(38)));
         LinearLayout branding=new LinearLayout(this);branding.setOrientation(LinearLayout.VERTICAL);branding.setGravity(Gravity.CENTER_VERTICAL);TextView brand=text("Zem iBox",20,INK);brand.setMaxLines(1);brand.setHorizontallyScrolling(false);brand.setEllipsize(TextUtils.TruncateAt.END);brand.setAutoSizeTextTypeUniformWithConfiguration(14,20,1,android.util.TypedValue.COMPLEX_UNIT_SP);brand.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));branding.addView(brand);TextView tagline=text("ТВОЯ ДОРОГА В КАДРЕ",8,MUTED);tagline.setLetterSpacing(.12f);tagline.setSingleLine();tagline.setEllipsize(TextUtils.TruncateAt.END);if(getResources().getConfiguration().screenWidthDp>=360&&getResources().getConfiguration().fontScale<=1.15f)branding.addView(tagline);title.addView(branding,new LinearLayout.LayoutParams(0,-2,1));
@@ -98,7 +99,8 @@ public final class MainActivity extends Activity {
     }
     private void disconnect(){leaveRecording(()->{resumeLive=false;stopLive();s.disconnect();});}
     private void appMenu(View anchor){PopupMenu popup=new PopupMenu(this,anchor);popup.getMenu().add("Wi-Fi регистратора");if(s.connected())popup.getMenu().add("Отключиться");popup.getMenu().add("Логи и диагностика");popup.getMenu().add("О приложении");popup.setOnMenuItemClickListener(item->{String label=item.getTitle().toString();if(label.startsWith("Wi-Fi"))openWifi();else if(label.equals("Отключиться"))disconnect();else if(label.startsWith("Логи"))showLogs();else showAbout();return true;});popup.show();}
-    private void showAbout(){new AlertDialog.Builder(this).setTitle("Zem iBox "+BuildConfig.VERSION_NAME).setMessage("Просмотр и управление совместимыми регистраторами Jieli / DVRunning2.\n\nВозможности зависят от устройства и прошивки. Встроенный плеер использует libVLC 3.7.7 (VideoLAN).").setPositiveButton("Закрыть",null).setNeutralButton("Лицензии",(d,n)->{try{String notices,license;try(InputStream in=getAssets().open("third-party-notices.txt")){notices=new String(assetBytes(in),java.nio.charset.StandardCharsets.UTF_8);}try(InputStream in=getAssets().open("libvlc-LICENSE.txt")){license=new String(assetBytes(in),java.nio.charset.StandardCharsets.UTF_8);}TextView text=text(notices+"\n\n"+license,12,INK);text.setTextIsSelectable(true);ScrollView scroll=new ScrollView(this);scroll.setPadding(dp(16),0,dp(16),0);scroll.addView(text);new AlertDialog.Builder(this).setTitle("Открытые компоненты").setView(scroll).setPositiveButton("Закрыть",null).show();}catch(IOException e){fail("Лицензии",e);}}).show();}
+    private void showAbout(){new AlertDialog.Builder(this).setTitle("Zem iBox "+BuildConfig.VERSION_NAME).setMessage("Просмотр и управление совместимыми регистраторами Jieli / DVRunning2.\n\nВозможности зависят от устройства и прошивки. Встроенный плеер использует libVLC 3.7.7 (VideoLAN).").setPositiveButton("Закрыть",null).setNeutralButton("Лицензии",(d,n)->showLicenses(false)).show();}
+    private void showLicenses(boolean english){try{String notices,license;try(InputStream in=getAssets().open(english?"third-party-notices.txt":"third-party-notices-ru.txt")){notices=new String(assetBytes(in),java.nio.charset.StandardCharsets.UTF_8);}try(InputStream in=getAssets().open(english?"libvlc-LICENSE.txt":"libvlc-LICENSE-ru.txt")){license=new String(assetBytes(in),java.nio.charset.StandardCharsets.UTF_8);}TextView content=text(notices+"\n\n"+license,12,INK);content.setTextIsSelectable(true);ScrollView scroll=new ScrollView(this);scroll.setPadding(dp(16),0,dp(16),0);scroll.addView(content);new AlertDialog.Builder(this).setTitle(english?"Licenses · original":"Лицензии · русский перевод").setView(scroll).setPositiveButton("Закрыть",null).setNeutralButton(english?"На русском":"English original",(d,w)->showLicenses(!english)).show();}catch(IOException e){fail("Лицензии",e);}}
     private static byte[] assetBytes(InputStream in)throws IOException{ByteArrayOutputStream out=new ByteArrayOutputStream();Io.copy(in,out);return out.toByteArray();}
     private void openWifi(){leaveRecording(()->chooseWifi(false));}
     private void chooseWifi(boolean connectAfter){try{startActivityForResult(new Intent(Settings.Panel.ACTION_WIFI),connectAfter?WIFI_PICK:WIFI_PICK+1);}catch(ActivityNotFoundException e){startActivity(new Intent(Settings.ACTION_WIFI_SETTINGS));}}
@@ -109,6 +111,7 @@ public final class MainActivity extends Activity {
     }
     private void stateChanged(){
         if(isFinishing()||isDestroyed())return;
+        checkDeviceClock();
         boolean cardReady=s.connected()&&s.cardPresent(),cardArrived=cardReady&&!lastCardReady;lastCardReady=cardReady;
         if(deviceDialog!=null&&(!s.connected()||s.ctp!=deviceDialogOwner||deviceDialogCard&&!s.cardPresent()))dismissDeviceDialog();
         for(Map.Entry<View,Boolean> action:deviceActions.entrySet())action.getKey().setEnabled(s.connected()&&(!action.getValue()||s.cardPresent()));
@@ -139,6 +142,16 @@ public final class MainActivity extends Activity {
         for(SettingDef def:SettingDef.ALL){TextView t=settingViews.get(def.topic());if(t!=null){JSONObject st=s.state.get(def.topic());t.setEnabled(s.connected());t.setVisibility(s.connected()&&st!=null&&st.has(def.key())&&s.supports(def.topic())&&(!def.topic().equals("DOUBLE_VIDEO")||s.rearAvailable())?View.VISIBLE:View.GONE);t.setText(Ui.settingValue(def.title(),st==null?"Не получено":def.display(st.optString(def.key()))));}}
         if(tab==2&&body!=null&&Library.all(this).length()!=localCount){body.removeAllViews();localPage();}
         if(tab==1){if(!s.cardPresent()&&!remote.isEmpty()){remote.clear();renderRemote();}else renderRemoteState();if(cardArrived&&!remoteLoading&&remote.isEmpty())refreshFiles();}
+    }
+    private void checkDeviceClock(){
+        if(!s.connected()||s.connecting){pendingClock=null;return;}long connectionId=s.connectionId();
+        if(checkedClockConnection!=connectionId){checkedClockConnection=connectionId;final CtpClient owner=s.ctp;
+            s.worker.execute(()->{try{org.json.JSONObject data=owner.request("DATE_TIME","GET",null,3);DeviceClock.Reading reading=DeviceClock.read(data.optString("date"),System.currentTimeMillis());s.main.post(()->{if(!s.isCurrent(owner)||isFinishing()||isDestroyed())return;if(reading!=null&&reading.needsSync()){pendingClock=reading;pendingClockConnection=connectionId;showClockPrompt();}Diag.log("DEVICE TIME",reading==null?"Device time unavailable":"differenceSeconds="+reading.differenceSeconds());});}catch(Exception e){Diag.log("DEVICE TIME","Check unavailable: "+e.getClass().getSimpleName());}});
+        }
+        showClockPrompt();
+    }
+    private void showClockPrompt(){if(!visible||pendingClock==null||deviceDialog!=null||!s.connected()||pendingClockConnection!=s.connectionId())return;DeviceClock.Reading reading=pendingClock;pendingClock=null;CtpClient owner=s.ctp;
+        showDeviceDialog(new AlertDialog.Builder(this).setTitle("Время регистратора отличается").setMessage(reading.message(System.currentTimeMillis())).setNegativeButton("Пока нет",null).setPositiveButton("Синхронизировать",(d,w)->{if(deviceReady(owner,false))command(owner,"DATE_TIME",p("date",DeviceClock.wire(System.currentTimeMillis())),()->toast("Время отправлено регистратору"));}),false);
     }
     private void connect(){if(connectionPending||s.connecting)return;if(!s.hasWifi()){connectionHelp(false);return;}attemptConnect();}
     private void attemptConnect(){
@@ -181,7 +194,7 @@ public final class MainActivity extends Activity {
     }
     private void showLiveQuality(){
         if(!requireConnection())return;final CtpClient owner=s.ctp;
-        String[] all={"640 × 480","1280 × 720","1920 × 1080"};List<Integer> levels=new ArrayList<>();List<String> labels=new ArrayList<>();JSONArray supported=s.supportedLevels(camera==0?"forward_support":"behind_support");
+        String[] all={"640 × 480","1280 × 720","1920 × 1080"};List<Integer> levels=new ArrayList<>();List<String> labels=new ArrayList<>();JSONArray supported=s.supportedLevels((s.liveTransport().equals("rtsp")?"rtsp_":"")+(camera==0?"forward_support":"behind_support"));
         for(int level=0;level<all.length;level++){boolean found=supported==null;for(int j=0;supported!=null&&j<supported.length();j++)found|=supported.optInt(j,-1)==level;if(found){levels.add(level);labels.add(all[level]);}}
         if(levels.isEmpty()){toast("Регистратор не сообщил доступное качество");return;}
         String actual=live==null?"Лайв остановлен":"Сейчас с регистратора: "+live.width()+" × "+live.height();
@@ -209,27 +222,27 @@ public final class MainActivity extends Activity {
     private void startLive(){
         if(!s.connected()){toast("Сначала подключись к регистратору");return;}
         if(surface==null||!surface.getHolder().getSurface().isValid()){toast("Видеоповерхность ещё не готова");return;}
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);wantsLive=true;stateChanged();final long generation=++liveGeneration;final Surface target=surface.getHolder().getSurface();final int cam=camera,res=quality;
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);thumbnails.pause();wantsLive=true;stateChanged();final long generation=++liveGeneration;final Surface target=surface.getHolder().getSurface();final SurfaceView targetView=surface;final int cam=camera,res=quality;
         s.worker.execute(()->{
-            LiveStream old=live;live=null;if(old!=null){old.close();old.awaitStopped();}
+            LiveSource old=live;live=null;if(old!=null){old.close();old.awaitStopped();}
             if(generation!=liveGeneration||!wantsLive||tab!=0||!target.isValid())return;
-            LiveStream next=new LiveStream(s,target,cam,res,new LiveStream.Listener(){
+            LiveSource.Listener listener=new LiveSource.Listener(){
                 public void status(String text){s.main.post(()->{if(generation==liveGeneration&&liveStatus!=null&&tab==0){liveStatus.setText(text);if(live!=null&&preview!=null)preview.videoSize(live.width(),live.height());stateChanged();}});}
-                public void frame(FrameAssembler.Frame f){PhoneRecording rec=phoneRecording;if(generation==liveGeneration&&rec!=null)rec.accept(f);}
-            });live=next;next.mute(!sound);next.start();
+                public void frame(FrameAssembler.Frame f){PhoneCapture rec=phoneRecording;if(generation==liveGeneration&&rec!=null)rec.accept(f);}
+            };LiveSource next=s.liveTransport().equals("rtsp")?new RtspLive(s,targetView,cam,res,listener):new LiveStream(s,target,cam,res,listener);live=next;next.mute(!sound);next.start();
         });
     }
-    private void stopLive(){getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);liveGeneration++;wantsLive=false;if(previewPlaceholder!=null)previewPlaceholder.setVisibility(View.VISIBLE);LiveStream old=live;live=null;if(old!=null){old.close();s.worker.execute(old::awaitStopped);}stopPhoneRecording();}
-    private volatile PhoneRecording phoneRecording;
+    private void stopLive(){getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);liveGeneration++;wantsLive=false;if(previewPlaceholder!=null)previewPlaceholder.setVisibility(View.VISIBLE);LiveSource old=live;live=null;if(old!=null){old.close();s.worker.execute(old::awaitStopped);}stopPhoneRecording();}
+    private volatile PhoneCapture phoneRecording;
     private void togglePhoneRecording(Button button){
         if(phoneRecording!=null){stopPhoneRecording();return;}if(phoneSaving)return;
         if(!s.connected()||live==null||!live.hasVideo()){toast("Дождитесь изображения с камеры");return;}
-        try{phoneRecording=new PhoneRecording(this,live.width(),live.height(),live.sampleRate(),live.sps(),live.pps(),live.frameRate());phoneStarted=SystemClock.elapsedRealtime();s.main.removeCallbacks(recordTicker);s.main.post(recordTicker);stateChanged();toast("Запись на телефон начата");}catch(Exception e){fail("Запись на телефон",e);}
+        try{phoneRecording=live.recording(this);phoneStarted=SystemClock.elapsedRealtime();s.main.removeCallbacks(recordTicker);s.main.post(recordTicker);stateChanged();toast("Запись на телефон начата");}catch(Exception e){fail("Запись на телефон",e);}
     }
     private final Runnable recordTicker=new Runnable(){public void run(){updateRecordingStatus();if(phoneRecording!=null)s.main.postDelayed(this,1000);}};
     private void updateRecordingStatus(){if(recordingStatus==null)return;recordingStatus.setVisibility(phoneRecording!=null||phoneSaving?View.VISIBLE:View.GONE);long seconds=(SystemClock.elapsedRealtime()-phoneStarted)/1000;recordingStatus.setText(phoneSaving?"Сохраняем видео на телефон…":String.format(Locale.ROOT,"● Запись на телефон · %02d:%02d",seconds/60,seconds%60));}
     private void showSaved(String message){savedMessage=message;stateChanged();}
-    private void stopPhoneRecording(){PhoneRecording rec=phoneRecording;phoneRecording=null;s.main.removeCallbacks(recordTicker);if(rec==null)return;phoneSaving=true;stateChanged();s.worker.execute(()->{try{rec.finish();s.main.post(()->{phoneSaving=false;showSaved("Видео сохранено");});}catch(Exception e){s.main.post(()->{phoneSaving=false;stateChanged();fail("Сохранение видео",e);});}});}
+    private void stopPhoneRecording(){PhoneCapture rec=phoneRecording;phoneRecording=null;s.main.removeCallbacks(recordTicker);if(rec==null)return;phoneSaving=true;stateChanged();s.worker.execute(()->{try{rec.finish();s.main.post(()->{phoneSaving=false;showSaved("Видео сохранено");});}catch(Exception e){s.main.post(()->{phoneSaving=false;stateChanged();fail("Сохранение видео",e);});}});}
 
     private void snapshot(){
         if(!s.connected()||live==null||!live.hasVideo()||surface==null){toast("Дождитесь изображения с камеры");return;}
@@ -297,15 +310,21 @@ public final class MainActivity extends Activity {
     private void download(MediaItem f){if(!requireCard())return;try{if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED&&!getPreferences(0).getBoolean("notificationAsked",false)){getPreferences(0).edit().putBoolean("notificationAsked",true).apply();requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},8);}TransferService.enqueue(this,f);toast("Добавлено в очередь: "+f.name);}catch(Exception e){fail("Скачивание",e);}}
     private void openRemoteVlc(MediaItem f){if(!requireCard())return;try{startActivity(PlaybackQueue.remote(this,s,filtered(),f).putExtra("openVlc",true));}catch(Exception e){fail("VLC",e);}}
     private void openRemote(MediaItem f){if(!requireCard())return;try{startActivity(f.photo()?new Intent(this,PlayerActivity.class).putExtra("uri",s.url(f.path).toString()).putExtra("mime",f.mime()).putExtra("name",f.name):PlaybackQueue.remote(this,s,filtered(),f));}catch(Exception e){fail("Просмотр",e);}}
-    private void localPage(){
-        JSONArray items=Library.all(this);localCount=items.length();LinearLayout heading=row();heading.addView(Ui.heading(this,"На телефоне",items.length()==0?"Моменты, которые вы сохранили":"Сохранено файлов: "+items.length()),new LinearLayout.LayoutParams(0,-2,1));boolean hasVideos=false;for(int i=0;i<items.length();i++)hasVideos|=items.optJSONObject(i).optString("mime").startsWith("video/");if(hasVideos){Button playAll=Ui.iconButton(this,"play","Смотреть видео подряд");playAll.setOnClickListener(v->openLocalQueue(items,null));heading.addView(playAll,new LinearLayout.LayoutParams(dp(48),dp(48)));}body.addView(heading);body.addView(text("Нажмите файл — откроется выбор плеера или галереи. Меню ⋮ — поделиться.",12,MUTED));
-        FrameLayout area=new FrameLayout(this);ListView list=new ListView(this);localList=list;list.setDivider(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));list.setDividerHeight(dp(8));list.setClipToPadding(false);list.setPadding(0,dp(4),0,dp(4));area.addView(list,new FrameLayout.LayoutParams(-1,-1));TextView empty=emptyLabel("folder");empty.setText("Здесь будут ваши кадры и видео\nСохраните момент с камеры или скачайте запись из архива");area.addView(empty,new FrameLayout.LayoutParams(-1,-2,Gravity.CENTER));list.setEmptyView(empty);body.addView(area,new LinearLayout.LayoutParams(-1,0,1));
+    private void chooseTransport(){if(!requireConnection())return;CtpClient owner=s.ctp;String[] modes={"auto","tcp","udp","rtsp"},labels={"Автоматически по устройству","TCP · Jieli","UDP · Jieli","RTSP · H.264 / MJPEG"};int selected=java.util.Arrays.asList(modes).indexOf(s.transportPreference());showDeviceDialog(new AlertDialog.Builder(this).setTitle("Передача видео").setSingleChoiceItems(labels,selected,(d,index)->{d.dismiss();if(deviceReady(owner,false))leaveRecording(()->{boolean resume=wantsLive;stopLive();s.setLiveTransport(modes[index]);if(resume&&tab==0)startLive();});}).setNegativeButton("Закрыть",null),false);}
+    private void refreshLocalFiles(){if(checkingLibrary)return;checkingLibrary=true;Library.IO.execute(()->{try{Library.reconcile(this);}catch(Exception e){Diag.error("Check phone files",e);}finally{s.main.post(()->{checkingLibrary=false;if(!isFinishing()&&!isDestroyed())stateChanged();});}});}
+    private void updateThumbnailWork(){if(visible&&(tab==1||tab==2)&&!wantsLive)thumbnails.resume();else thumbnails.pause();}
+    private void localPage(){refreshLocalFiles();
+        JSONArray items=Library.all(this);localCount=items.length();boolean compact=getResources().getConfiguration().fontScale>1.2f&&getResources().getConfiguration().screenHeightDp<700;
+        LinearLayout header=column(),heading=row();heading.addView(Ui.heading(this,"На телефоне",items.length()==0?"Моменты, которые вы сохранили":"Сохранено файлов: "+items.length()),new LinearLayout.LayoutParams(0,-2,1));boolean hasVideos=false;for(int i=0;i<items.length();i++)hasVideos|=items.optJSONObject(i).optString("mime").startsWith("video/");if(hasVideos){Button playAll=Ui.iconButton(this,"play","Смотреть видео подряд");playAll.setOnClickListener(v->openLocalQueue(items,null));heading.addView(playAll,new LinearLayout.LayoutParams(dp(48),dp(48)));}header.addView(heading);header.addView(text("Папка: Download / Zem iBox Drive\nНажмите файл для выбора плеера. Меню ⋮ — другие действия.",12,MUTED));
+        FrameLayout area=new FrameLayout(this);ListView list=new ListView(this);localList=list;list.setDivider(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));list.setDividerHeight(dp(8));list.setClipToPadding(false);list.setPadding(0,dp(4),0,dp(4));area.addView(list,new FrameLayout.LayoutParams(-1,-1));TextView empty=emptyLabel("folder");empty.setText("Здесь будут ваши кадры и видео\nСохраните момент с камеры или скачайте запись из архива");
+        Button folder=button("Открыть папку записей",false);Ui.leading(folder,"folder");folder.setOnClickListener(v->openRecordingsFolder());LinearLayout.LayoutParams folderParams=new LinearLayout.LayoutParams(-1,-2);folderParams.topMargin=dp(10);folderParams.bottomMargin=dp(10);
+        if(compact){if(items.length()==0)header.addView(empty);list.addHeaderView(header,null,false);LinearLayout footer=column();footer.addView(folder,folderParams);list.addFooterView(footer,null,false);body.addView(area,new LinearLayout.LayoutParams(-1,-1));}
+        else{body.addView(header);area.addView(empty,new FrameLayout.LayoutParams(-1,-2,Gravity.CENTER));list.setEmptyView(empty);body.addView(area,new LinearLayout.LayoutParams(-1,0,1));body.addView(folder,folderParams);}
         list.setAdapter(new Rows(items.length(),i->{JSONObject item=items.optJSONObject(i);return item.optString("name")+"\n"+TransferService.bytes(item.optLong("size"));},i->{JSONObject item=items.optJSONObject(i);openLocal(Uri.parse(item.optString("uri")),item.optString("mime"));},i->localActions(items.optJSONObject(i)),i->MediaThumbnails.Source.local(items.optJSONObject(i))));
-        list.setOnItemClickListener((p,v,pos,id)->{JSONObject item=items.optJSONObject(pos);openLocal(Uri.parse(item.optString("uri")),item.optString("mime"));});
-        list.setOnItemLongClickListener((p,v,pos,id)->{localActions(items.optJSONObject(pos));return true;});
-        Button folder=button("Открыть Загрузки",false);Ui.leading(folder,"folder");folder.setOnClickListener(v->{try{startActivity(new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS));}catch(Exception e){fail("Загрузки",e);}});body.addView(folder,new LinearLayout.LayoutParams(-1,-2));
+        list.setOnItemClickListener((p,v,pos,id)->{JSONObject item=items.optJSONObject(pos-list.getHeaderViewsCount());if(item!=null)openLocal(Uri.parse(item.optString("uri")),item.optString("mime"));});
+        list.setOnItemLongClickListener((p,v,pos,id)->{JSONObject item=items.optJSONObject(pos-list.getHeaderViewsCount());if(item==null)return false;localActions(item);return true;});
     }
-    private void localActions(JSONObject item){boolean video=item.optString("mime").startsWith("video/");new AlertDialog.Builder(this).setTitle(item.optString("name")).setItems(video?new String[]{"Открыть в…","Внутренний плеер · смотреть подряд","Открыть через VLC","Поделиться"}:new String[]{"Открыть в…","Поделиться"},(d,n)->{Uri uri=Uri.parse(item.optString("uri"));if(n==0)openLocal(uri,item.optString("mime"));else if(video&&n==1)openLocalQueue(Library.all(this),uri.toString());else if(video&&n==2){try{startActivity(MediaOpen.vlc(uri,item.optString("mime")));}catch(ActivityNotFoundException e){toast("VLC не установлен");}}else share(uri,item.optString("mime"));}).show();}
+    private void localActions(JSONObject item){boolean video=item.optString("mime").startsWith("video/");new AlertDialog.Builder(this).setTitle(item.optString("name")).setItems(video?new String[]{"Открыть в…","Внутренний плеер · смотреть подряд","Открыть через VLC","Поделиться"}:new String[]{"Открыть в…","Поделиться"},(d,n)->{Uri uri=Uri.parse(item.optString("uri"));if(n==0)openLocal(uri,item.optString("mime"));else if(video&&n==1)openLocalQueue(Library.all(this),uri.toString());else if(video&&n==2)openLocalIn(uri,item.optString("mime"),true);else share(uri,item.optString("mime"));}).show();}
     private void openLocalQueue(JSONArray items,String selected){try{startActivity(PlaybackQueue.local(this,items,selected));}catch(Exception e){fail("Просмотр видео",e);}}
     private void settingsPage(){
         settingViews.clear();deviceActions.clear();connectButton=null;rearSwitch=null;deviceLabel=null;card=null;
@@ -320,11 +339,11 @@ public final class MainActivity extends Activity {
         }
         LinearLayout identity=Ui.card(this);TextView eyebrow=Ui.section(this,"Ваше устройство");eyebrow.setPadding(0,0,0,dp(4));identity.addView(eyebrow);deviceLabel=text(s.connected()?s.deviceName():"Регистратор не подключён",17,INK);deviceLabel.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));identity.addView(deviceLabel);card=text("",12,MUTED);identity.addView(card);content.addView(identity);
         connectButton=button(s.connected()?"Отключиться":"Подключить",!s.connected());connectButton.setOnClickListener(v->{if(s.connected())disconnect();else connect();});content.addView(connectButton,new LinearLayout.LayoutParams(-1,-2));addAction(content,"Сеть Wi-Fi",this::openWifi);
-        content.addView(Ui.section(this,"Камеры и запись"));Switch rear=new Switch(this);rearSwitch=rear;rear.setText("Задняя камера");Ui.switchStyle(rear);rear.setChecked(s.rearEnabled());rear.setOnCheckedChangeListener((v,on)->{s.setRearEnabled(on);if(!on)camera=0;stateChanged();});content.addView(rear);content.addView(text("Включите, если к регистратору подключена вторая камера.",12,MUTED));
+        content.addView(Ui.section(this,"Камеры и запись"));addDeviceAction(content,"Передача видео",this::chooseTransport);Switch rear=new Switch(this);rearSwitch=rear;rear.setText("Задняя камера");Ui.switchStyle(rear);rear.setChecked(s.rearEnabled());rear.setOnCheckedChangeListener((v,on)->{s.setRearEnabled(on);if(!on)camera=0;stateChanged();});content.addView(rear);content.addView(text("Включите, если к регистратору подключена вторая камера.",12,MUTED));
         addDeviceAction(content,"Разрешение записи · передняя",()->videoResolution(0));if(s.rearAvailable())addDeviceAction(content,"Разрешение записи · задняя",()->videoResolution(1));
         for(SettingDef def:SettingDef.ALL){TextView t=text(def.title(),14,INK);t.setPadding(dp(16),dp(13),dp(16),dp(13));t.setCompoundDrawablesRelativeWithIntrinsicBounds(null,null,Ui.icon(this,"chevron",16,MUTED),null);t.setCompoundDrawablePadding(dp(8));t.setBackground(Ui.panel(this,CARD,16));t.setMinHeight(dp(58));content.addView(t,new LinearLayout.LayoutParams(-1,-2));settingViews.put(def.topic(),t);t.setOnClickListener(v->editSetting(def));}
         addDeviceAction(content,"Обновить настройки",()->deviceAsync("Чтение настроек",false,c->{for(SettingDef def:SettingDef.ALL)try{if(tab!=3||settingsTab!=0)break;if(!s.isCurrent(c))break;c.request(def.topic(),"GET",null,1);}catch(CtpClient.DeviceException e){if(e.code!=6)Diag.error("Read "+def.topic(),e);}catch(Exception e){Diag.error("Read "+def.topic(),e);if(!s.connected())break;}},null));
-        content.addView(Ui.section(this,"Подключение и обслуживание"));addDeviceAction(content,"Дата и время с телефона",()->command("DATE_TIME",p("date",new SimpleDateFormat("yyyyMMddHHmmss",Locale.ROOT).format(new Date())),()->toast("Дата и время отправлены")));
+        content.addView(Ui.section(this,"Подключение и обслуживание"));addDeviceAction(content,"Дата и время с телефона",()->command("DATE_TIME",p("date",DeviceClock.wire(System.currentTimeMillis())),()->toast("Дата и время отправлены")));
         addDeviceAction(content,"Память и прошивка",()->deviceAsync("Сведения",false,c->{if(s.cardPresent())try{s.command(c,"TF_CAP","GET",null);}catch(Exception e){Diag.error("Capacity",e);}},()->showDeviceDialog(new AlertDialog.Builder(this).setTitle("Регистратор").setMessage(s.report()).setPositiveButton("Закрыть",null),false)));
         addDeviceAction(content,"Имя и пароль Wi-Fi",this::changeWifi);addAction(content,"Адрес подключения",this::addressDialog);addDeviceAction(content,"Перезагрузить регистратор",()->confirm("Перезагрузить регистратор?","Wi-Fi отключится до завершения перезагрузки.",false,c->command(c,"RESET",null,()->{stopLive();s.disconnect();})));
         if(BuildConfig.ALLOW_DESTRUCTIVE_ACTIONS)addDeviceAction(content,"Сбросить настройки регистратора",()->confirm("Сброс настроек","Будут восстановлены заводские настройки регистратора. Имя и пароль Wi-Fi могут измениться.",false,c->command(c,"SYSTEM_DEFAULT",p("def","1"),null)));
@@ -364,7 +383,20 @@ public final class MainActivity extends Activity {
     private void clearLogs(TextView preview){
         async("Очистка логов",Diag::clear,()->{clipboardParts=null;clipboardIndex=0;copyButton.setText("Скопировать короткий отчёт");preview.setText(Diag.tail());android.content.ClipboardManager cb=getSystemService(android.content.ClipboardManager.class);if(cb.hasPrimaryClip()&&cb.getPrimaryClipDescription()!=null&&TextUtils.equals("Zem iBox logs",cb.getPrimaryClipDescription().getLabel()))cb.clearPrimaryClip();toast(Diag.enabled()?"Логи очищены. Новые события продолжают записываться":"Логи очищены. Запись выключена");});
     }
-    private void openLocal(Uri uri,String mime){try{startActivity(MediaOpen.chooser(uri,mime));}catch(ActivityNotFoundException e){fail("Открыть файл",new IOException("На телефоне нет приложения для этого формата",e));}}
+    private void openLocal(Uri uri,String mime){openLocalIn(uri,mime,false);}
+    private void openLocalIn(Uri uri,String mime,boolean vlc){
+        if(openingLocal)return;openingLocal=true;long request=++localOpenRequest;final int page=tab;
+        Library.IO.execute(()->{Exception failure=null;try{Library.requireReadable(this,uri);}catch(Exception e){failure=e;if(e instanceof FileNotFoundException)try{Library.forget(this,Collections.singleton(uri.toString()));}catch(Exception ignored){}}
+            Exception error=failure;s.main.post(()->{openingLocal=false;if(request!=localOpenRequest||!visible||page!=tab||isFinishing()||isDestroyed())return;
+                if(error!=null){stateChanged();fail("Файл недоступен",new IOException("Файл удалён или к нему нет доступа. Список записей обновлён.",error));return;}
+                try{startActivity(vlc?MediaOpen.vlc(uri,mime):MediaOpen.chooser(uri,mime));}
+                catch(ActivityNotFoundException e){fail("Открыть файл",new IOException(vlc?"VLC не установлен":"На телефоне нет приложения для этого формата",e));}
+                catch(RuntimeException e){fail("Открыть файл",new IOException("Android не смог открыть выбор приложения. Попробуйте внутренний плеер.",e));}
+            });
+        });
+    }
+    private void openRecordingsFolder(){try{startActivity(MediaOpen.folderChooser(this));}catch(Exception e){try{startActivity(new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS));}catch(Exception fallback){fail("Папка записей",fallback);}}}
+
     private void copyLogs(){
         try {
             String value=Diag.compact(s.report()+"\nUSER NOTE: "+note);
@@ -418,7 +450,7 @@ public final class MainActivity extends Activity {
     }
     private final class MediaRow extends LinearLayout {
         final TextView title,detail;final ImageView glyph;final LinearLayout open;final Button more;
-        MediaRow(){super(MainActivity.this);setOrientation(HORIZONTAL);setGravity(Gravity.CENTER_VERTICAL);setPadding(dp(4),dp(4),dp(4),dp(4));setBackground(Ui.panel(MainActivity.this,CARD,17));open=new LinearLayout(MainActivity.this);open.setOrientation(HORIZONTAL);open.setGravity(Gravity.CENTER_VERTICAL);open.setPadding(dp(8),dp(9),0,dp(9));open.setFocusable(true);open.setClickable(true);open.setBackground(Ui.buttonBackground(MainActivity.this,false,"segment"));addView(open,new LinearLayout.LayoutParams(0,-2,1));glyph=new ImageView(MainActivity.this);glyph.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);glyph.setPadding(dp(10),dp(10),dp(10),dp(10));glyph.setBackground(Ui.panel(MainActivity.this,0xff1c3540,10));glyph.setClipToOutline(true);open.addView(glyph,new LinearLayout.LayoutParams(dp(84),dp(56)));LinearLayout labels=new LinearLayout(MainActivity.this);labels.setOrientation(VERTICAL);labels.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);title=text("",14,INK);title.setMaxLines(2);title.setEllipsize(TextUtils.TruncateAt.MIDDLE);title.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));detail=text("",12,MUTED);detail.setMaxLines(3);detail.setEllipsize(TextUtils.TruncateAt.END);labels.addView(title);labels.addView(detail);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,-2,1);lp.setMargins(dp(12),0,dp(8),0);open.addView(labels,lp);more=Ui.iconButton(MainActivity.this,"menu","Действия с файлом");addView(more,new LinearLayout.LayoutParams(dp(48),dp(48)));}
+        MediaRow(){super(MainActivity.this);setOrientation(HORIZONTAL);setGravity(Gravity.CENTER_VERTICAL);setPadding(dp(8),dp(8),dp(8),dp(8));setBackground(Ui.panel(MainActivity.this,CARD,17));open=new LinearLayout(MainActivity.this);open.setOrientation(HORIZONTAL);open.setGravity(Gravity.CENTER_VERTICAL);open.setPadding(0,dp(5),0,dp(5));open.setFocusable(true);open.setClickable(true);open.setBackground(new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x2452d9ca),null,Ui.panel(MainActivity.this,Color.WHITE,10)));addView(open,new LinearLayout.LayoutParams(0,-2,1));glyph=new ImageView(MainActivity.this);glyph.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);glyph.setPadding(dp(10),dp(10),dp(10),dp(10));glyph.setBackground(Ui.panel(MainActivity.this,0xff1c3540,10));glyph.setClipToOutline(true);open.addView(glyph,new LinearLayout.LayoutParams(dp(84),dp(56)));LinearLayout labels=new LinearLayout(MainActivity.this);labels.setOrientation(VERTICAL);labels.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);title=text("",14,INK);title.setMaxLines(2);title.setEllipsize(TextUtils.TruncateAt.MIDDLE);title.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));detail=text("",12,MUTED);detail.setMaxLines(3);detail.setEllipsize(TextUtils.TruncateAt.END);labels.addView(title);labels.addView(detail);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,-2,1);lp.setMargins(dp(12),0,dp(8),0);open.addView(labels,lp);more=Ui.iconButton(MainActivity.this,"menu","Действия с файлом");LinearLayout.LayoutParams moreParams=new LinearLayout.LayoutParams(dp(48),dp(48));moreParams.leftMargin=dp(8);addView(more,moreParams);}
     }
     private void goBack(){if(fullScreen)toggleFullScreen();else if(tab!=0)navigate(0);else leaveRecording(this::finish);}
     // API 33+ uses the OnBackInvokedCallback registered in onCreate; this override serves API 30–32.
@@ -426,7 +458,7 @@ public final class MainActivity extends Activity {
     @Override public void onBackPressed(){goBack();}
     public void onConfigurationChanged(Configuration c){super.onConfigurationChanged(c);}
     private void rebindThumbnails(ListView list){if(list==null)return;ListAdapter adapter=list.getAdapter();if(adapter instanceof HeaderViewListAdapter header)adapter=header.getWrappedAdapter();if(adapter instanceof BaseAdapter rows)rows.notifyDataSetChanged();}
-    protected void onResume(){super.onResume();visible=true;thumbnails.resume();rebindThumbnails(fileList);rebindThumbnails(localList);if(resumeLive&&tab==0&&s.connected()&&surface!=null&&surface.getHolder().getSurface().isValid()){resumeLive=false;surface.post(this::startLive);}}
+    protected void onResume(){super.onResume();visible=true;checkDeviceClock();updateThumbnailWork();if(tab==1)rebindThumbnails(fileList);if(tab==2){rebindThumbnails(localList);refreshLocalFiles();}if(resumeLive&&tab==0&&s.connected()&&surface!=null&&surface.getHolder().getSurface().isValid()){resumeLive=false;surface.post(this::startLive);}}
     protected void onPause(){visible=false;thumbnails.pause();resumeLive|=wantsLive&&tab==0&&s.connected();stopLive();super.onPause();}
     protected void onDestroy(){s.unlisten(observer);thumbnails.close();dismissDeviceDialog();stopLive();super.onDestroy();}
     protected void onSaveInstanceState(Bundle b){b.putInt("tab",tab);b.putInt("camera",camera);b.putInt("quality",quality);super.onSaveInstanceState(b);}

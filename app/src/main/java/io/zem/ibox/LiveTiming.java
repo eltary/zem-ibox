@@ -4,9 +4,10 @@ package io.zem.ibox;
 final class LiveTiming {
     private double periodUs;
     private long nextUs=-1,windowStartUs,windowFrames;
-    private boolean fixed;
+    private int ratePriority;
     LiveTiming(double fps){periodUs=1_000_000.0/Math.max(1,Math.min(60,fps));}
-    void fixedRate(double fps){if(fps>=1&&fps<=60){periodUs=1_000_000.0/fps;fixed=true;}}
+    void fixedRate(double fps){sourceRate(fps,2);}
+    synchronized void sourceRate(double fps,int priority){if(fps>=1&&fps<=60&&priority>=ratePriority){periodUs=1_000_000.0/fps;ratePriority=priority;}}
     synchronized double fps(){return 1_000_000.0/periodUs;}
     long next(long arrivalUs){return next(arrivalUs,1);}
     synchronized long next(long arrivalUs,long sequenceSteps){
@@ -15,7 +16,7 @@ final class LiveTiming {
         long elapsed=arrivalUs-windowStartUs;
         // Firmware sometimes ignores requested fps as well as dimensions. Estimate over
         // several seconds, never from one packet gap; VUI timing takes precedence.
-        if(!fixed&&elapsed>=3_000_000){double rate=(windowFrames-1)*1_000_000.0/elapsed;
+        if(ratePriority==0&&elapsed>=6_000_000){double rate=(windowFrames-1)*1_000_000.0/elapsed;
             if(rate>=10&&rate<=60){for(double standard:new double[]{15,20,24,25,30,50,60})if(Math.abs(rate-standard)/standard<.03){rate=standard;break;}periodUs=1_000_000.0/rate;}
             windowStartUs=arrivalUs;windowFrames=1;
         }

@@ -42,3 +42,4 @@ qa/ux-attempts/
 qa/ux-build.log
 qa/ux-integration-run.log
 qa/ux-readme-diff.txt
+__pycache__/

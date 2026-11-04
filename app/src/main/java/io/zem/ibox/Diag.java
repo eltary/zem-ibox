@@ -19,7 +19,7 @@ public final class Diag {
         dir=new File(c.getFilesDir(),"logs"); dir.mkdirs();preferences=c.getSharedPreferences("diagnostics",Context.MODE_PRIVATE);enabled=preferences.getBoolean("enabled",true);
         log("APP","START Zem iBox "+BuildConfig.VERSION_NAME+" Android "+Build.VERSION.RELEASE+" API "+Build.VERSION.SDK_INT+" "+Build.MANUFACTURER+" "+Build.MODEL+" ABIs="+Arrays.toString(Build.SUPPORTED_ABIS));
         Thread.UncaughtExceptionHandler previous=Thread.getDefaultUncaughtExceptionHandler();
-        Thread.setDefaultUncaughtExceptionHandler((t,e)->{error("CRASH "+t.getName(),e); if(previous!=null)previous.uncaughtException(t,e);});
+        Thread.setDefaultUncaughtExceptionHandler((t,e)->{error("CRASH "+t.getName(),e);saveCrash("CRASH "+t.getName(),e); if(previous!=null)previous.uncaughtException(t,e);});
         if(enabled)startNativeCapture("1");
     }
     public static boolean enabled(){return enabled;}
@@ -46,7 +46,7 @@ public final class Diag {
         stopNativeCapture();
         try{
             File[] files=dir.listFiles();if(files==null)throw new IOException("Журнал недоступен");
-            for(File f:files)if(f.getName().matches("roadlink(?:\\.[1-9])?\\.log|android\\.log(?:\\.[1-4])?"))java.nio.file.Files.deleteIfExists(f.toPath());
+            for(File f:files)if(f.getName().matches("roadlink(?:\\.[1-9])?\\.log|android\\.log(?:\\.[1-4])?|last-crash.log"))java.nio.file.Files.deleteIfExists(f.toPath());
             log("APP","Logs cleared by user. Zem iBox "+BuildConfig.VERSION_NAME+" "+Build.MANUFACTURER+" "+Build.MODEL+" Android "+Build.VERSION.RELEASE+" API "+Build.VERSION.SDK_INT);
         }finally{if(enabled)startNativeCapture(since);}
     }
@@ -65,9 +65,10 @@ public final class Diag {
         } catch(IOException e){Log.e("Zem iBox/LOG", "Log write failed",e);}
     }
     static String redact(String s) {
-        return s.replaceAll("(?i)(\"(?:pwd|password|token)\"\\s*:\\s*\")[^\"]*","$1[REDACTED]");
+        return s.replaceAll("(?i)(\"(?:pwd|password|token)\"\\s*:\\s*\")[^\"]*","$1[REDACTED]").replaceAll("(?i)(\\b(?:pwd|password|token)\\s*[=:]\\s*)[^\\s,;&\"\\r\\n]+","$1[REDACTED]");
     }
     public static void error(String context,Throwable e) {if(!enabled)return;StringWriter w=new StringWriter();e.printStackTrace(new PrintWriter(w));log("ERROR",context+"\n"+w);}
+    static synchronized void saveCrash(String context,Throwable error){if(dir==null||!enabled)return;try{StringWriter trace=new StringWriter();error.printStackTrace(new PrintWriter(trace));String value=redact(clock.format(new java.util.Date())+" "+context+"\n"+trace);if(value.length()>6000)value=value.substring(0,6000);try(Writer out=new OutputStreamWriter(new FileOutputStream(new File(dir,"last-crash.log")),StandardCharsets.UTF_8)){out.write(value);}}catch(IOException ignored){}}
     public static synchronized List<String> copyParts(String state) throws IOException {
         log("COPY","User copied complete diagnostic journal");
         StringBuilder text=new StringBuilder(redact(state)).append('\n');
@@ -107,9 +108,10 @@ public final class Diag {
         for(int i=4;i>=0;i--){File f=new File(dir,i==0?"android.log":"android.log."+i);if(!f.isFile())continue;
             try(RandomAccessFile in=new RandomAccessFile(f,"r")){in.seek(Math.max(0,in.length()-24576));byte[] bytes=new byte[(int)(in.length()-in.getFilePointer())];in.readFully(bytes);for(String line:new String(bytes,StandardCharsets.UTF_8).split("\n"))if(usefulNativeLine(line)&&line.matches(".* [WEF] .*")){int start=line.indexOf(" E ");if(start<0)start=line.indexOf(" W ");if(start<0)start=line.indexOf(" F ");int colon=line.indexOf(':',Math.max(0,start));String tag=colon>start?line.substring(start+3,colon).trim():"native";nativeErrors.put(tag,line.length()>400?line.substring(0,400):line);}}
         }
-        String ending="\nПоследние показатели:\n"+String.join("\n",latest.values())+"\nПоследние системные ошибки:\n"+String.join("\n",nativeErrors.values());if(ending.length()>4500)ending=ending.substring(ending.length()-4500);
+        File crashFile=new File(dir,"last-crash.log");String crash=crashFile.isFile()?"\nПоследний вылет:\n"+new String(java.nio.file.Files.readAllBytes(crashFile.toPath()),StandardCharsets.UTF_8):"";if(crash.length()>1600)crash=crash.substring(0,1600);
+        String ending=crash+"\nПоследние показатели:\n"+String.join("\n",latest.values())+"\nПоследние системные ошибки:\n"+String.join("\n",nativeErrors.values());if(ending.length()>4500)ending=ending.substring(0,4500);
         String report;
-        do{report=redact(prefix+String.join("\n",events)+ending);if(report.getBytes(StandardCharsets.UTF_8).length<=12288)break;if(events.isEmpty()){ending=ending.substring(ending.length()/2);prefix=prefix.substring(0,prefix.length()/2);}else events.removeFirst();}while(true);
+        do{report=redact(prefix+String.join("\n",events)+ending);if(report.getBytes(StandardCharsets.UTF_8).length<=12288)break;if(events.isEmpty()){ending=ending.substring(0,ending.length()/2);prefix=prefix.substring(0,prefix.length()/2);}else events.removeFirst();}while(true);
         return report;
     }
     public static synchronized android.net.Uri export(Context context,String state)throws IOException {

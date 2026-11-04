@@ -1,0 +1,17 @@
+LibVLC для Android 3.7.7
+Авторы VLC и организация VideoLAN.
+
+Библиотека распространяется по GNU LGPL версии 2.1 или более поздней.
+Ниже приведён неофициальный русский перевод для ознакомления. Юридические условия определяются английским оригиналом, доступным кнопкой «English original».
+
+Библиотеки поставляются без изменений и подключаются динамически как заменяемые общие объекты. Уведомления зависимостей AndroidX / Kotlin включены в META-INF там, где их предоставляют авторы.
+
+Двоичные файлы и соответствующие исходники Java:
+https://repo.maven.apache.org/maven2/org/videolan/android/libvlc-all/3.7.7/
+Исходники и проект сборки:
+https://code.videolan.org/videolan/vlc-android
+https://code.videolan.org/videolan/vlc
+
+Русский перевод: Елена Тяпкина, 20 марта 2002 года.
+Источник перевода: https://jxself.org/translations/lgpl-2.1.ru.shtml
+Ссылка GNU на перевод: https://www.gnu.org/licenses/old-licenses/lgpl-2.1-translations.ru.html

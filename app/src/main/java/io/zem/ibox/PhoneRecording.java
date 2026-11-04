@@ -11,7 +11,7 @@ import java.util.*;
 import java.util.concurrent.*;
 
 /** Records the actual live frames, including PCM audio; independent of the recorder's SD card. */
-public final class PhoneRecording {
+public final class PhoneRecording implements PhoneCapture {
     private final Context context;
     private final int width,height,rate;private final double fps;
     private final long start=System.nanoTime();

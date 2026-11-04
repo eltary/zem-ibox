@@ -64,7 +64,7 @@ with zipfile.ZipFile(apk) as z,zipfile.ZipFile(aar) as upstream:
     assert {x['path'].split('/')[1] for x in native}=={'arm64-v8a','armeabi-v7a'}
     assert len(native)==6
     assets={p for p in z.namelist() if p.startswith('assets/')}
-    own_assets={'assets/libvlc-LICENSE.txt','assets/third-party-notices.txt'}
+    own_assets={'assets/libvlc-LICENSE.txt','assets/third-party-notices.txt','assets/libvlc-LICENSE-ru.txt','assets/third-party-notices-ru.txt'}
     vlc_assets={p for p in upstream.namelist() if p.startswith('assets/') and not p.endswith('/')}
     assert assets==own_assets|vlc_assets,assets
     for name in own_assets:assert z.read(name)==(root/'app/src/main'/name).read_bytes()

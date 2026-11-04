@@ -7,6 +7,8 @@ VIDEO = (ROOT / 'test-clip.mp4').read_bytes()
 RAW = (ROOT / 'live.h264').read_bytes()
 PCM = (ROOT / 'audio.pcm').read_bytes()
 JPEG = (ROOT / 'frame.jpg').read_bytes()
+_motion=ROOT.parent/'qa/playback-0.0.13/generated/rtsp-motion.mjpg'
+MOTION_JPEG=[m.group() for m in re.finditer(b'\xff\xd8.*?\xff\xd9',_motion.read_bytes(),re.DOTALL)] if _motion.exists() else [JPEG]
 AVI = (ROOT / 'playback-test.avi').read_bytes()
 AUD = [m.start() for m in re.finditer(b'\x00\x00(?:\x00)?\x01\x09', RAW)]
 FRAMES = [RAW[a:b] for a,b in zip(AUD, AUD[1:]+[len(RAW)])]
@@ -58,11 +60,14 @@ def control(client):
                 reply('VIDEO_CTRL',{'status':'0'})
                 reply('VIDEO_MIC',{'mic':'1'})
             elif topic=='PULL_VIDEO_STATUS': reply(topic,{'status':str(int(state['rear']))})
+            elif topic=='DATE_TIME':
+                if msg.get('op')=='PUT':state['clock']=p.get('date');reply(topic,p)
+                else:reply(topic,{'date':state['clock']} if state.get('clock') else {})
             elif topic=='CTP_KEEP_ALIVE': reply(topic)
             elif topic=='SD_STATUS': reply(topic,{'online':str(int(state['card']))})
             elif topic in ('OPEN_RT_STREAM','OPEN_PULL_RT_STREAM'):
                 state['camera']=int(topic=='OPEN_PULL_RT_STREAM');state['width']=int(p.get('w',640)); state['stream']=True
-                reply(topic,{'format':'0' if state['transport']=='udp' else '1','w':str(state['width']),'h':p.get('h','480'),'fps':'20','rate':'8000'})
+                reply(topic,{'format':str(state['codec']) if state.get('codec') is not None else '0' if state['transport']=='udp' else '1','w':str(state['width']),'h':p.get('h','480'),'fps':'20','rate':'8000'})
             elif topic in ('CLOSE_RT_STREAM','CLOSE_PULL_RT_STREAM'):
                 state['stream']=False; reply(topic,{'status':'1'})
             elif topic in ('FORWARD_MEDIA_FILES_LIST','BEHIND_MEDIA_FILES_LIST'):
@@ -85,14 +90,14 @@ def streaming(client):
     try:
         while True:
             if not state['stream'] or state['transport']!='tcp': time.sleep(.01); continue
-            start=time.monotonic();frames=SIZES[1920 if state['fixed'] else state['width']];frame=frames[seq%len(frames)]
+            start=time.monotonic();frames=SIZES[1920 if state['fixed'] else state['width']];kind=2 if state.get('codec')==0 else 3;frame=MOTION_JPEG[seq%len(MOTION_JPEG)] if kind==2 else frames[seq%len(frames)]
             # Actual iBOX TCP framing: unused UDP fragment size is zero,
             # complete 32-bit frame length at byte 8. Fragment header and body
             # across writes to exercise stream reads, not datagram assumptions.
-            video=struct.pack('<BBHIIII',3,0,0,seq,len(frame),0,seq*50)+frame
+            video=struct.pack('<BBHIIII',kind,0,0,seq,len(frame),0,seq*50)+frame
             client.sendall(video[:7]);client.sendall(video[7:20]);client.sendall(video[20:276]);client.sendall(video[276:])
             sound=PCM[(seq%80)*800:(seq%80+1)*800]
-            if sound:
+            if sound and state.get('audio',True):
                 client.sendall(struct.pack('<BBHIIII',1,0,0,seq,len(sound),0,seq*50)+sound)
             seq+=1
             if state.get('burst'):time.sleep(.2 if seq%4==0 else 0)
@@ -121,13 +126,41 @@ class HTTP(BaseHTTPRequestHandler):
     def log_message(self,fmt,*args): print('HTTP',fmt%args,flush=True)
     def do_GET(self):
         if self.path=='/test/reset':
-            state['burst']=False;state['hd_dropped']=False;state['media_requests']=0;state['commands']={};state['list_mode']='normal';state['rear']=True;state['card']=False;state['break_once']=True;state['transport']='tcp';state['fixed']=False;state['width']=640;data=b'ok'
+            state['clock']=None;state['audio']=True;state['codec']=None;state['burst']=False;state['hd_dropped']=False;state['media_requests']=0;state['commands']={};state['list_mode']='normal';state['rear']=True;state['card']=False;state['break_once']=True;state['transport']='tcp';state['fixed']=False;state['width']=640;data=b'ok'
         elif self.path=='/test/media':
             data=json.dumps({'requests':state.get('media_requests',0)}).encode()
         elif self.path=='/test/commands':
             with lock:data=json.dumps(state['commands']).encode()
         elif self.path.startswith('/test/list/'):
             state['list_mode']=self.path.rsplit('/',1)[1];data=b'ok'
+        elif self.path.startswith('/test/clock/'):
+            state['clock']=self.path.rsplit('/',1)[1];data=b'ok'
+        elif self.path.startswith('/test/rtp/'):
+            import base64
+            from rtsp_fixture import nals,jpeg_data
+            jpeg=self.path.endswith('/jpeg');payloads=[]
+            for frame in (MOTION_JPEG[:20] if jpeg else FRAMES[:20]):
+                packets=[]
+                if jpeg:
+                    w,h,q,scan=jpeg_data(frame);tables=q[0]+q.get(1,q[0])
+                    for off in range(0,len(scan),1100):
+                        body=bytes([0])+off.to_bytes(3,'big')+bytes([1,255,w//8,h//8])
+                        if off==0:body+=bytes([0,0])+len(tables).to_bytes(2,'big')+tables
+                        packets.append(body+scan[off:off+1100])
+                else:
+                    for nal in nals(frame):
+                        if nal[0]&31 not in (1,5,6,7,8):continue
+                        if len(nal)<=1200:packets.append(nal)
+                        else:
+                            for off in range(0,len(nal)-1,1198):packets.append(bytes([(nal[0]&224)|28,(nal[0]&31)|(128 if off==0 else 0)|(64 if off+1198>=len(nal)-1 else 0)])+nal[1+off:1+off+1198])
+                payloads.append([base64.b64encode(packet).decode() for packet in packets])
+            units=nals(FRAMES[0]);sps=next(n for n in units if n[0]&31==7);pps=next(n for n in units if n[0]&31==8)
+            data=json.dumps({'frames':payloads,'sps':base64.b64encode(sps).decode(),'pps':base64.b64encode(pps).decode()}).encode()
+        elif self.path=='/test/raw.h264':data=RAW
+        elif self.path.startswith('/test/codec/'):
+            state['codec']=int(self.path.rsplit('/',1)[1]);data=b'ok'
+        elif self.path.startswith('/test/audio/'):
+            state['audio']=self.path.endswith('/1');data=b'ok'
         elif self.path.startswith('/test/burst/'):
             state['burst']=self.path.endswith('/1');data=b'ok'
         elif self.path.startswith('/test/quality/'):
@@ -141,7 +174,7 @@ class HTTP(BaseHTTPRequestHandler):
         elif self.path.startswith('/test/card/'):
             state['card']=self.path.endswith('/1');data=b'ok'
         elif self.path.startswith('/mnt/spiflash/res/dev_desc.txt'):
-            data=json.dumps({'net_type':'1' if state['transport']=='udp' else '0','rts_type':'0' if state['transport']=='udp' else '1','device_type':'1','firmware_version':'SIMULATED','uuid':'local-test-only','forward_support':['0','1','2'],'behind_support':['0','1']}).encode()
+            data=json.dumps({'net_type':'1' if state['transport']=='udp' else '0','rts_type':str(state['codec']) if state.get('codec') is not None else '0' if state['transport']=='udp' else '1','device_type':'1','rtsp_forward_support':['0','1','2'],'rtsp_behind_support':['0','1'],'rtsp_port':8554,'firmware_version':'SIMULATED','uuid':'local-test-only','forward_support':['0','1','2'],'behind_support':['0','1']}).encode()
         elif self.path.startswith('/list/'):
             mode=state['list_mode']
             if mode=='fail':
@@ -208,4 +241,6 @@ threading.Thread(target=serve,args=(3333,control),daemon=True).start()
 threading.Thread(target=serve,args=(2229,streaming),daemon=True).start()
 threading.Thread(target=udp_streaming,daemon=True).start()
 print('SIMULATOR READY; H264 frames=',len(FRAMES),flush=True)
+from rtsp_fixture import start as start_rtsp
+start_rtsp(8554,FRAMES,JPEG,PCM,state)
 ThreadingHTTPServer(('127.0.0.1',8080),HTTP).serve_forever()

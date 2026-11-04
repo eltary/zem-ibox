@@ -65,6 +65,9 @@ public final class JieliSession {
     public boolean rearAvailable(){JSONObject st=state.get("PULL_VIDEO_STATUS");return connected()&&rearEnabled()&&(st==null||!"0".equals(st.optString("status")))&&supports("PULL_VIDEO_STATUS");}
     public void setRearEnabled(boolean enabled){permissionContext.getSharedPreferences("devices",0).edit().putBoolean("rear."+deviceIdentity(),enabled).apply();changed();if(enabled&&connected())worker.execute(()->{try{command("PULL_VIDEO_STATUS","GET",null);}catch(Exception e){Diag.error("Rear camera status",e);}});}
     public JSONArray supportedLevels(String key){Object value=description.opt(key);if(value instanceof JSONArray)return (JSONArray)value;if(value instanceof String)try{return new JSONArray((String)value);}catch(JSONException ignored){}return null;}
+    public String liveTransport(){String saved=permissionContext.getSharedPreferences("devices",0).getString("transport."+deviceIdentity(),"auto");return Set.of("tcp","udp","rtsp").contains(saved)?saved:StreamCapabilities.automatic(description);}
+    public String transportPreference(){return permissionContext.getSharedPreferences("devices",0).getString("transport."+deviceIdentity(),"auto");}
+    public void setLiveTransport(String mode){if(!Set.of("auto","tcp","udp","rtsp").contains(mode))throw new IllegalArgumentException();permissionContext.getSharedPreferences("devices",0).edit().putString("transport."+deviceIdentity(),mode).apply();changed();}
     public boolean supports(String topic){return !unsupported.contains(topic);}
     public boolean cardPresent(){JSONObject s=state.get("SD_STATUS");return s!=null&&"1".equals(s.optString("online"));}
     public boolean cardKnown(){return state.containsKey("SD_STATUS");}

@@ -12,12 +12,12 @@ import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-public final class LiveStream implements AutoCloseable {
-    public interface Listener {void status(String text);void frame(FrameAssembler.Frame f);}
+public final class LiveStream implements LiveSource {
+    public interface Listener extends LiveSource.Listener {}
     private final JieliSession session;
     private final Surface surface;
-    private final Listener listener;
-    private final int camera,level;
+    private final LiveSource.Listener listener;
+    private final int camera,level;private final CtpClient owner;
     private volatile boolean running=true,muted=true;
     private DatagramSocket udp;private Socket tcp;
     private MediaCodec decoder;private AudioTrack audio;
@@ -34,7 +34,7 @@ public final class LiveStream implements AutoCloseable {
     private final Object decodeLock=new Object();
     private final CountDownLatch stopped=new CountDownLatch(1);
     private volatile byte[] sps,pps;
-    public LiveStream(JieliSession session,Surface surface,int camera,int level,Listener listener){this.session=session;this.surface=surface;this.camera=camera;this.level=level;this.listener=listener;}
+    public LiveStream(JieliSession session,Surface surface,int camera,int level,LiveSource.Listener listener){this.session=session;this.owner=session.ctp;this.surface=surface;this.camera=camera;this.level=level;this.listener=listener;}
     public void start(){new Thread(this::run,"Live receiver").start();}
     public void mute(boolean value){muted=value;Diag.log("LIVE","mute="+value);}
     public boolean hasVideo(){return running&&renderedFrames>0;}
@@ -43,15 +43,15 @@ public final class LiveStream implements AutoCloseable {
         String open=camera==0?"OPEN_RT_STREAM":"OPEN_PULL_RT_STREAM";
         try {
             Network net=session.network;
-            boolean useTcp="0".equals(session.description.optString("net_type","1"));
+            boolean useTcp=session.liveTransport().equals("tcp");
             if(!useTcp){udp=new DatagramSocket(null);udp.setReuseAddress(true);udp.setReceiveBufferSize(2*1024*1024);if(net!=null)net.bindSocket(udp);udp.bind(new InetSocketAddress(camera==0?2224:2225));udp.setSoTimeout(1000);}
             else {tcp=net==null?new Socket():net.getSocketFactory().createSocket();tcp.setReceiveBufferSize(2*1024*1024);tcp.setTcpNoDelay(true);tcp.connect(new InetSocketAddress(session.host,2229),6000);tcp.setSoTimeout(1000);}
             int[] widths={640,1280,1920},heights={480,720,1080};requestedWidth=width=widths[level];requestedHeight=height=heights[level];
-            int format=session.description.optInt("rts_type",1);
+            int format=session.description.optInt("rts_type",1)==0?0:1;
             JSONObject cameraParams=session.state.get(camera==0?"VIDEO_PARAM":"PULL_VIDEO_PARAM");int fps=cameraParams==null?25:cameraParams.optInt("fps",25);if(fps<1||fps>60)fps=25;
             timing=new LiveTiming(fps);
             listener.status("Запуск видеопотока…");
-            JSONObject reply=session.put(open,JieliSession.params("format",""+format,"w",""+width,"h",""+height,"fps",""+fps,"rate","8000"));
+            JSONObject reply=session.command(owner,open,"PUT",JieliSession.params("format",""+format,"w",""+width,"h",""+height,"fps",""+fps,"rate","8000"));
             width=reply.optInt("w",width);height=reply.optInt("h",height);sample=reply.optInt("rate",8000);
             Diag.log("LIVE","Start camera="+camera+" transport="+(useTcp?"TCP:2229":"UDP:"+(camera==0?2224:2225))+" parameters="+reply);
             renderThread=new Thread(this::renderLoop,"Live decoder");renderThread.start();
@@ -70,14 +70,14 @@ public final class LiveStream implements AutoCloseable {
                         long pts=timing.next(System.nanoTime()/1000,sequenceSteps);FrameAssembler.Frame timed=new FrameAssembler.Frame(f.type(),f.sequence(),f.timestamp(),f.data(),pts);listener.frame(timed);previewQueue.offer(timed,key);frameCount++;lastFrame=System.currentTimeMillis();
                     }
                 }
-                long now=System.currentTimeMillis();if(now-stats>=1000){double seconds=(now-stats)/1000.0;receiveFps=(frameCount-priorFrames)/seconds;renderFps=(renderedFrames-priorRendered)/seconds;megabits=(receivedBytes-priorBytes)*8/seconds/1000000;stats=now;priorFrames=frameCount;priorRendered=renderedFrames;priorBytes=receivedBytes;if(Diag.enabled())Diag.log("LIVE STATS",statistics()+" sps="+(sps==null?0:sps.length)+" pps="+(pps==null?0:pps.length));listener.status(statusText());}
+                long now=System.currentTimeMillis();if(now-stats>=1000){double seconds=(now-stats)/1000.0;receiveFps=(frameCount-priorFrames)/seconds;renderFps=(renderedFrames-priorRendered)/seconds;megabits=(receivedBytes-priorBytes)*8/seconds/1000000;stats=now;priorFrames=frameCount;priorRendered=renderedFrames;priorBytes=receivedBytes;if(Diag.enabled())Diag.log("LIVE STATS",statistics()+" clockFps="+timing.fps()+" sps="+(sps==null?0:sps.length)+" pps="+(pps==null?0:pps.length));listener.status(statusText());}
             }
         }catch(Exception e){if(running){Diag.error("Live stream",e);listener.status("Лайв: "+e.getMessage());}}
         finally {
             running=false;closeSockets();previewQueue.close();
             if(renderThread!=null){renderThread.interrupt();try{renderThread.join(3000);}catch(InterruptedException e){Thread.currentThread().interrupt();}}
             synchronized(decodeLock){if(decoder!=null){try{decoder.stop();}catch(Exception ignored){}decoder.release();decoder=null;}if(audio!=null){audio.release();audio=null;}}
-            try{if(session.connected())session.put(camera==0?"CLOSE_RT_STREAM":"CLOSE_PULL_RT_STREAM",JieliSession.params("status","1"));}catch(Exception e){Diag.error("Close live",e);}
+            try{if(session.isCurrent(owner))session.command(owner,camera==0?"CLOSE_RT_STREAM":"CLOSE_PULL_RT_STREAM","PUT",JieliSession.params("status","1"));}catch(Exception e){Diag.error("Close live",e);}
             Diag.log("LIVE","Stopped "+statistics());
             stopped.countDown();
         }
@@ -117,7 +117,8 @@ public final class LiveStream implements AutoCloseable {
             }
         }
     }
-    private void drain(){MediaCodec.BufferInfo info=new MediaCodec.BufferInfo();for(int k=0;k<12;k++){int i=decoder.dequeueOutputBuffer(info,0);if(i>=0){long now=System.nanoTime(),target=info.presentationTimeUs*1000+displayOffsetNanos;if(target<now-80_000_000L||target>now+400_000_000L){displayOffsetNanos+=now+160_000_000L-target;target=now+160_000_000L;}decoder.releaseOutputBuffer(i,Math.max(now,target));renderedFrames++;lastRendered=System.currentTimeMillis();}else if(i==MediaCodec.INFO_OUTPUT_FORMAT_CHANGED){MediaFormat fmt=decoder.getOutputFormat();int codedWidth=fmt.getInteger(MediaFormat.KEY_WIDTH,width),codedHeight=fmt.getInteger(MediaFormat.KEY_HEIGHT,height);width=fmt.containsKey("crop-right")?fmt.getInteger("crop-right")-fmt.getInteger("crop-left",0)+1:codedWidth;height=fmt.containsKey("crop-bottom")?fmt.getInteger("crop-bottom")-fmt.getInteger("crop-top",0)+1:codedHeight;decoder.setVideoScalingMode(MediaCodec.VIDEO_SCALING_MODE_SCALE_TO_FIT);Diag.log("CODEC FORMAT",fmt.toString());Diag.log("LIVE QUALITY","requested="+requestedWidth+"x"+requestedHeight+" actual="+width+"x"+height+" coded="+codedWidth+"x"+codedHeight);}else break;}}
+    private void drain(){MediaCodec.BufferInfo info=new MediaCodec.BufferInfo();for(int k=0;k<12;k++){int i=decoder.dequeueOutputBuffer(info,0);if(i>=0){long now=System.nanoTime(),target=info.presentationTimeUs*1000+displayOffsetNanos;if(target<now-80_000_000L||target>now+400_000_000L){displayOffsetNanos+=now+160_000_000L-target;target=now+160_000_000L;}decoder.releaseOutputBuffer(i,Math.max(now,target));renderedFrames++;lastRendered=System.currentTimeMillis();}else if(i==MediaCodec.INFO_OUTPUT_FORMAT_CHANGED){MediaFormat fmt=decoder.getOutputFormat();int codedWidth=fmt.getInteger(MediaFormat.KEY_WIDTH,width),codedHeight=fmt.getInteger(MediaFormat.KEY_HEIGHT,height);width=fmt.containsKey("crop-right")?fmt.getInteger("crop-right")-fmt.getInteger("crop-left",0)+1:codedWidth;height=fmt.containsKey("crop-bottom")?fmt.getInteger("crop-bottom")-fmt.getInteger("crop-top",0)+1:codedHeight;decoder.setVideoScalingMode(MediaCodec.VIDEO_SCALING_MODE_SCALE_TO_FIT);updateRecordedFrameRate();Diag.log("CODEC FORMAT",fmt.toString());Diag.log("LIVE QUALITY","requested="+requestedWidth+"x"+requestedHeight+" actual="+width+"x"+height+" coded="+codedWidth+"x"+codedHeight);}else break;}}
+    private void updateRecordedFrameRate(){try{JSONObject recording=session.state.get("VIDEO_CTRL"),event=session.state.get("VIDEO_FINISH");if(recording==null||!"1".equals(recording.optString("status"))||event==null)return;JSONObject file=new JSONObject(event.optString("desc"));if(file.optInt("c",-1)==camera&&file.optInt("w")==width&&file.optInt("h")==height){int fps=file.optInt("p");if(fps>=10&&fps<=60){timing.sourceRate(fps,1);Diag.log("LIVE TIMING","Recording metadata rate="+fps+" fps");}}}catch(org.json.JSONException ignored){}}
     private static String prefix(byte[] bytes,int max){StringBuilder hex=new StringBuilder();for(int i=0;i<Math.min(bytes.length,max);i++)hex.append(String.format(Locale.ROOT,"%02x",bytes[i]&255));return hex.toString();}
     private void playAudio(byte[] pcm){
         if(muted||pcm.length==0)return;

@@ -1,0 +1,29 @@
+package io.zem.ibox;
+
+import android.net.Network;
+import android.util.Base64;
+import org.json.*;
+import java.net.*;
+import java.io.*;
+import java.nio.*;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
+import java.util.concurrent.*;
+
+/** Runs inside the emulator: WSL NAT cannot deliver inbound UDP to its Wi-Fi. */
+final class RtspUdpFixture implements AutoCloseable {
+    final ServerSocket server;final String host;final Network wifi;final boolean jpeg;final JSONObject fixture;
+    final List<Socket> clients=new CopyOnWriteArrayList<>();final List<DatagramSocket> sockets=new CopyOnWriteArrayList<>();volatile boolean closed;volatile int rejectedTcp;
+    RtspUdpFixture(Network wifi,String host,boolean jpeg,JSONObject fixture)throws Exception{this.wifi=wifi;this.host=host;this.jpeg=jpeg;this.fixture=fixture;server=new ServerSocket(0,2,InetAddress.getByName(host));Thread accept=new Thread(()->{while(!closed)try{Socket socket=server.accept();clients.add(socket);Thread client=new Thread(()->serve(socket),"UDP RTSP fixture client");client.setDaemon(true);client.start();}catch(IOException ignored){}},"UDP RTSP fixture");accept.setDaemon(true);accept.start();}
+    int port(){return server.getLocalPort();}
+    private DatagramSocket datagram()throws IOException{DatagramSocket socket=new DatagramSocket(null);wifi.bindSocket(socket);socket.bind(new InetSocketAddress(host,0));sockets.add(socket);return socket;}
+    private void serve(Socket socket){Map<Integer,DatagramSocket> rtp=new ConcurrentHashMap<>();java.util.concurrent.atomic.AtomicBoolean playing=new java.util.concurrent.atomic.AtomicBoolean();try{BufferedReader reader=new BufferedReader(new InputStreamReader(socket.getInputStream(),StandardCharsets.ISO_8859_1));OutputStream out=socket.getOutputStream();String line;while(!closed&&(line=reader.readLine())!=null){if(line.isEmpty())continue;String[] parts=line.split(" ");Map<String,String> headers=new HashMap<>();while((line=reader.readLine())!=null&&!line.isEmpty()){int colon=line.indexOf(':');if(colon>0)headers.put(line.substring(0,colon).toLowerCase(Locale.ROOT),line.substring(colon+1).trim());}String method=parts[0],uri=parts[1],extra="",body="";int code=200;
+        if(method.equals("DESCRIBE")){body="v=0\r\no=- 0 0 IN IP4 "+host+"\r\ns=Zem UDP fixture\r\nt=0 0\r\na=control:*\r\nm=video 0 RTP/AVP "+(jpeg?26:96)+"\r\nc=IN IP4 0.0.0.0\r\n"+(jpeg?"a=rtpmap:26 JPEG/90000\r\n":"a=rtpmap:96 H264/90000\r\na=fmtp:96 packetization-mode=1;sprop-parameter-sets="+fixture.optString("sps")+","+fixture.optString("pps")+"\r\n")+"a=control:trackID=0\r\nm=audio 0 RTP/AVP 97\r\nc=IN IP4 0.0.0.0\r\na=rtpmap:97 L16/8000/1\r\na=control:trackID=1\r\n";extra="Content-Type: application/sdp\r\nContent-Base: "+uri+"/\r\n";}
+        else if(method.equals("SETUP")){String transport=headers.getOrDefault("transport","");if(transport.contains("interleaved")){code=461;rejectedTcp++;}else{java.util.regex.Matcher ports=java.util.regex.Pattern.compile("client_port=([0-9]+)-([0-9]+)").matcher(transport);if(!ports.find())throw new IOException("Missing client UDP ports");int track=uri.contains("trackID=1")?1:0;DatagramSocket data=datagram(),control=datagram();data.connect(socket.getInetAddress(),Integer.parseInt(ports.group(1)));control.connect(socket.getInetAddress(),Integer.parseInt(ports.group(2)));rtp.put(track,data);extra="Session: zem-udp\r\nTransport: RTP/AVP;unicast;client_port="+ports.group(1)+"-"+ports.group(2)+";server_port="+data.getLocalPort()+"-"+control.getLocalPort()+"\r\n";}}
+        else if(method.equals("PLAY")){extra="Session: zem-udp\r\n";if(playing.compareAndSet(false,true)){Thread stream=new Thread(()->stream(rtp,playing),"UDP RTP fixture");stream.setDaemon(true);stream.start();}}
+        else if(method.equals("TEARDOWN")){playing.set(false);}
+        byte[] payload=body.getBytes(StandardCharsets.US_ASCII);out.write(("RTSP/1.0 "+code+(code==200?" OK":" Unsupported Transport")+"\r\nCSeq: "+headers.getOrDefault("cseq","1")+"\r\n"+extra+"Content-Length: "+payload.length+"\r\n\r\n").getBytes(StandardCharsets.US_ASCII));out.write(payload);out.flush();
+    }}catch(Exception ignored){}finally{playing.set(false);for(DatagramSocket data:rtp.values())data.close();clients.remove(socket);try{socket.close();}catch(IOException ignored){}}}
+    private void stream(Map<Integer,DatagramSocket> tracks,java.util.concurrent.atomic.AtomicBoolean playing){int frame=0,sequence=0,audioSequence=0;try{JSONArray frames=fixture.getJSONArray("frames");while(!closed&&playing.get()){long started=System.nanoTime();JSONArray packets=frames.getJSONArray(frame%frames.length());DatagramSocket video=tracks.get(0);if(video!=null)for(int i=0;i<packets.length();i++){byte[] payload=Base64.decode(packets.getString(i),Base64.DEFAULT);byte[] wire=ByteBuffer.allocate(12+payload.length).order(ByteOrder.BIG_ENDIAN).put((byte)128).put((byte)((jpeg?26:96)|(i==packets.length()-1?128:0))).putShort((short)sequence++).putInt(frame*4500).putInt(0x12345678).put(payload).array();video.send(new DatagramPacket(wire,wire.length));}DatagramSocket audio=tracks.get(1);if(audio!=null){byte[] wire=ByteBuffer.allocate(812).order(ByteOrder.BIG_ENDIAN).put((byte)128).put((byte)225).putShort((short)audioSequence++).putInt(frame*400).putInt(0x12345679).put(new byte[800]).array();audio.send(new DatagramPacket(wire,wire.length));}frame++;long wait=50-(System.nanoTime()-started)/1000000;if(wait>0)Thread.sleep(wait);}}catch(Exception ignored){}}
+    public void close(){closed=true;try{server.close();}catch(IOException ignored){}for(Socket socket:clients)try{socket.close();}catch(IOException ignored){}for(DatagramSocket socket:sockets)socket.close();}
+}

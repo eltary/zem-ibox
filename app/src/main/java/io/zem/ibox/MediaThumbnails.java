@@ -64,7 +64,7 @@ final class MediaThumbnails implements AutoCloseable {
     }
     private static void display(ImageView view,Bitmap bitmap){view.setPadding(0,0,0,0);view.setScaleType(ImageView.ScaleType.CENTER_CROP);view.setImageBitmap(bitmap);}
     private boolean valid(int request,Source source){return !closed&&!paused&&request==generation&&source.ready();}
-    void pause(){paused=true;generation++;worker.getQueue().clear();waiting.clear();AutoCloseable current=active;if(current!=null)try{current.close();}catch(Exception ignored){}}
+    void pause(){if(paused)return;paused=true;generation++;worker.getQueue().clear();waiting.clear();AutoCloseable current=active;if(current!=null)try{current.close();}catch(Exception ignored){}}
     void resume(){if(!closed)paused=false;}
     public void close(){closed=true;pause();worker.shutdownNow();memory.evictAll();}
     private Bitmap load(Source source,int request)throws Exception {

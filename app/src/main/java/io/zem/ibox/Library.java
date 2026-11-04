@@ -9,6 +9,20 @@ import java.util.*;
 
 public final class Library {
     private static final String PREF="library";
+    static final java.util.concurrent.ExecutorService IO=java.util.concurrent.Executors.newSingleThreadExecutor(r->{Thread t=new Thread(r,"Phone library");t.setDaemon(true);return t;});
+    static void requireReadable(Context c,Uri uri)throws IOException {
+        try(android.content.res.AssetFileDescriptor file=c.getContentResolver().openAssetFileDescriptor(uri,"r")){if(file==null)throw new FileNotFoundException("Файл удалён или больше недоступен");}
+    }
+    static boolean reconcile(Context c)throws Exception {
+        JSONArray snapshot=all(c);Set<String> missing=new HashSet<>();
+        for(int i=0;i<snapshot.length();i++){String uri=snapshot.getJSONObject(i).optString("uri");try{requireReadable(c,Uri.parse(uri));}catch(FileNotFoundException e){missing.add(uri);}catch(SecurityException e){Diag.log("LIBRARY","No permission for "+uri);}catch(IOException e){Diag.log("LIBRARY","Cannot check "+uri+": "+e.getClass().getSimpleName());}}
+        return forget(c,missing);
+    }
+    static synchronized boolean forget(Context c,Set<String> uris)throws Exception {
+        if(uris.isEmpty())return false;JSONArray current=all(c),kept=new JSONArray();
+        for(int i=0;i<current.length();i++){JSONObject item=current.getJSONObject(i);if(!uris.contains(item.optString("uri")))kept.put(item);}
+        if(kept.length()==current.length())return false;c.getSharedPreferences(PREF,0).edit().putString("items",kept.toString()).commit();Diag.log("LIBRARY","Removed missing entries: "+(current.length()-kept.length()));RoadApp.instance.session.changed();return true;
+    }
     public static synchronized JSONArray all(Context c){try{return new JSONArray(c.getSharedPreferences(PREF,0).getString("items","[]"));}catch(Exception e){return new JSONArray();}}
     public static synchronized void add(Context c,Uri uri,String name,String mime,long size,String origin)throws Exception {
         add(c,uri,name,mime,size,origin,"");
