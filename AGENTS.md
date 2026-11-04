@@ -17,6 +17,9 @@ local.properties; default WSL SDK is ~/.cache/android-sdk.
 The working RoadLink 0.1.3 snapshot in baselines/ is immutable history.
 Legacy experiments in history/ are for reference, not the active app.
 Keep destructive commands disabled unless the user explicitly changes that.
+On 04.11.2026 the user explicitly enabled DVR microSD formatting. Keep it behind
+its dedicated confirmation and captured-session path; generic FORMAT, file
+deletion and factory reset stay blocked in default builds.
 Only emulator-5586 belongs to this project; never operate on other emulators.
 
 ## Версионирование — правило пользователя

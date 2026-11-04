@@ -27,20 +27,23 @@ public final class CtpClient implements AutoCloseable {
             }
         }catch(Exception e){if(!closed){Diag.error("CTP reader",e);close();listener.accept("__DISCONNECTED",new JSONObject());}}
     }
-    public JSONObject request(String topic,String op,JSONObject params,int timeoutSeconds)throws Exception {
+    public JSONObject request(String topic,String op,JSONObject params,int timeoutSeconds)throws Exception {return request(topic,op,params,timeoutSeconds,false);}
+    JSONObject formatCard()throws Exception {return request("FORMAT","PUT",null,60,true);}
+    private JSONObject request(String topic,String op,JSONObject params,int timeoutSeconds,boolean confirmedFormat)throws Exception {
         if(closed)throw new IOException("Соединение с регистратором закрыто");
         CompletableFuture<JSONObject> f=new CompletableFuture<>();
         if(waiting.putIfAbsent(topic,f)!=null)throw new IOException("Команда уже выполняется: "+topic);
         try {
-            send(topic,op,params);
+            send(topic,op,params,confirmedFormat);
             JSONObject answer=f.get(timeoutSeconds,TimeUnit.SECONDS);int code=answer.optInt("errno",0);
             if(code!=0)throw new DeviceException(code,topic,answer.optString("msg"));
             return answer.optJSONObject("param")==null?new JSONObject():answer.getJSONObject("param");
         }catch(TimeoutException e){Diag.error("CTP timeout "+topic,e);throw new IOException("Регистратор не ответил на "+topic,e);}
         finally {waiting.remove(topic,f);}
     }
-    public synchronized void send(String topic,String op,JSONObject params)throws Exception {
-        if(!BuildConfig.ALLOW_DESTRUCTIVE_ACTIONS&&java.util.Set.of("FILES_DELETE","FORMAT","FORMAT_TF_CARD","SYSTEM_DEFAULT").contains(topic.trim().toUpperCase(java.util.Locale.ROOT))){Diag.log("BLOCKED","Destructive command disabled during testing: "+topic);throw new SecurityException("Удаление файлов, форматирование и сброс настроек заблокированы на время проверки Zem iBox");}
+    public synchronized void send(String topic,String op,JSONObject params)throws Exception {send(topic,op,params,false);}
+    private synchronized void send(String topic,String op,JSONObject params,boolean confirmedFormat)throws Exception {
+        if(!BuildConfig.ALLOW_DESTRUCTIVE_ACTIONS&&!(confirmedFormat&&topic.equals("FORMAT")&&op.equals("PUT")&&params==null)&&java.util.Set.of("FILES_DELETE","FORMAT","FORMAT_TF_CARD","SYSTEM_DEFAULT").contains(topic.trim().toUpperCase(java.util.Locale.ROOT))){Diag.log("BLOCKED","Destructive command disabled during testing: "+topic);throw new SecurityException("Удаление и сброс заблокированы. Форматирование доступно только после отдельного подтверждения в настройках регистратора");}
         if(closed)throw new IOException("Соединение закрыто");
         JSONObject j=new JSONObject().put("op",op);if(params!=null)j.put("param",params);
         String value=j.toString();Diag.log("CTP TX",topic+" "+value);

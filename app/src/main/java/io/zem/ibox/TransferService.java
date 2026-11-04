@@ -39,7 +39,7 @@ public final class TransferService extends Service {
         c.startForegroundService(new Intent(c,TransferService.class).putExtra("batch",file.getName()));
     }
     private static JieliSession requireSource()throws IOException{JieliSession s=RoadApp.instance.session;if(!s.connected())throw new IOException("Сначала подключите видеорегистратор");if(!s.cardPresent())throw new IOException(s.cardKnown()?"В видеорегистраторе нет microSD":"Состояние microSD ещё не получено");return s;}
-    private static String deviceKey(JieliSession s){return s.deviceIdentity();}
+    private static String deviceKey(JieliSession s){long version=s.cardContentVersion();return s.deviceIdentity()+(version==0?"":"|card:"+version);}
     public void onCreate(){super.onCreate();current=this;nm=getSystemService(NotificationManager.class);nm.createNotificationChannel(new NotificationChannel("downloads","Скачивание записей",NotificationManager.IMPORTANCE_LOW));}
     public synchronized int onStartCommand(Intent intent,int flags,int id){
         latestStartId=id;

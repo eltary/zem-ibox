@@ -38,9 +38,9 @@ final class MediaThumbnails implements AutoCloseable {
         final JieliSession session;
         final CtpClient owner;
         private Source(String key,String uri,String mime,long size,JieliSession session,CtpClient owner,String path){this.key=key;this.uri=uri;this.mime=mime;this.size=size;this.session=session;this.owner=owner;this.path=path;}
-        boolean ready(){return session==null||session.isCurrent(owner)&&session.cardPresent();}
+        boolean ready(){return session==null||session.isCurrent(owner)&&session.cardPresent()&&!session.cardFormatting();}
         static Source remote(JieliSession session,MediaItem item){return remote(session,item,session.ctp);}
-        static Source remote(JieliSession session,MediaItem item,CtpClient owner){return new Source("dvr-v1|"+session.deviceIdentity()+"|"+item.path+"|"+item.time+"|"+item.size,"",item.mime(),item.size,session,owner,item.path);}
+        static Source remote(JieliSession session,MediaItem item,CtpClient owner){return new Source("dvr-v1|"+session.deviceIdentity()+"|card:"+session.cardContentVersion()+"|"+item.path+"|"+item.time+"|"+item.size,"",item.mime(),item.size,session,owner,item.path);}
         static Source local(JSONObject item){return new Source("phone-v1|"+item.optString("uri")+"|"+item.optLong("size")+"|"+item.optLong("at"),item.optString("uri"),item.optString("mime"),item.optLong("size"),null,null,"");}
     }
     MediaThumbnails(Context context){this.context=context.getApplicationContext();folder=new File(this.context.getCacheDir(),"media-thumbnails");}

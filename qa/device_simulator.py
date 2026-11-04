@@ -63,6 +63,17 @@ def control(client):
             elif topic=='DATE_TIME':
                 if msg.get('op')=='PUT':state['clock']=p.get('date');reply(topic,p)
                 else:reply(topic,{'date':state['clock']} if state.get('clock') else {})
+            elif topic=='FORMAT':
+                mode=state.get('format_mode','success')
+                if not state['card']:reply(topic,errno=2)
+                elif state['settings'].get('VIDEO_CTRL',{}).get('status')=='1':state['commands']['FORMAT_WHILE_RECORDING']=1;reply(topic,errno=8)
+                elif mode=='disconnect':client.close();return
+                elif mode=='reject':reply(topic,{'frm':'0'})
+                elif mode=='unsupported':reply(topic,errno=6)
+                elif mode=='missing':reply(topic,{})
+                else:
+                    time.sleep(1);state['list_mode']='empty';state['settings']['TF_CAP']={'left':'29854','total':'29854'};reply(topic,{'frm':'1'})
+            elif topic=='VIDEO_CTRL' and msg.get('op')=='PUT' and p.get('status')=='0' and state.get('format_mode')=='stopfail':reply(topic,{'status':'1'})
             elif topic=='CTP_KEEP_ALIVE': reply(topic)
             elif topic=='SD_STATUS': reply(topic,{'online':str(int(state['card']))})
             elif topic in ('OPEN_RT_STREAM','OPEN_PULL_RT_STREAM'):
@@ -126,7 +137,7 @@ class HTTP(BaseHTTPRequestHandler):
     def log_message(self,fmt,*args): print('HTTP',fmt%args,flush=True)
     def do_GET(self):
         if self.path=='/test/reset':
-            state['clock']=None;state['audio']=True;state['codec']=None;state['burst']=False;state['hd_dropped']=False;state['media_requests']=0;state['commands']={};state['list_mode']='normal';state['rear']=True;state['card']=False;state['break_once']=True;state['transport']='tcp';state['fixed']=False;state['width']=640;data=b'ok'
+            state['format_mode']='success';state['clock']=None;state['audio']=True;state['codec']=None;state['burst']=False;state['hd_dropped']=False;state['media_requests']=0;state['commands']={};state['list_mode']='normal';state['rear']=True;state['card']=False;state['break_once']=True;state['transport']='tcp';state['fixed']=False;state['width']=640;data=b'ok'
         elif self.path=='/test/media':
             data=json.dumps({'requests':state.get('media_requests',0)}).encode()
         elif self.path=='/test/commands':
@@ -159,6 +170,8 @@ class HTTP(BaseHTTPRequestHandler):
         elif self.path=='/test/raw.h264':data=RAW
         elif self.path.startswith('/test/codec/'):
             state['codec']=int(self.path.rsplit('/',1)[1]);data=b'ok'
+        elif self.path.startswith('/test/format/'):
+            state['format_mode']=self.path.rsplit('/',1)[1];data=b'ok'
         elif self.path.startswith('/test/audio/'):
             state['audio']=self.path.endswith('/1');data=b'ok'
         elif self.path.startswith('/test/burst/'):

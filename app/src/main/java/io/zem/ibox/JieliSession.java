@@ -29,7 +29,7 @@ public final class JieliSession {
     private volatile long lastHeartbeat;
     private final Set<String> unsupported=ConcurrentHashMap.newKeySet();
     private final Object sessionLock=new Object();
-    private long generation;
+    private long generation;private volatile CtpClient formattingOwner;public volatile String formatStatus="";
     public JieliSession(Context c){
         cm=c.getSystemService(ConnectivityManager.class);
         permissionContext=c.getApplicationContext();
@@ -72,6 +72,7 @@ public final class JieliSession {
     public boolean cardPresent(){JSONObject s=state.get("SD_STATUS");return s!=null&&"1".equals(s.optString("online"));}
     public boolean cardKnown(){return state.containsKey("SD_STATUS");}
     public void connect(String override)throws Exception {
+        if(cardFormatting())throw new IOException("Дождитесь завершения форматирования microSD");
         if(!networkAllowed)throw new IOException("Недоступны разрешения для подключения к регистратору");
         disconnect();final long attempt;synchronized(sessionLock){attempt=generation;connecting=true;status="Подключение…";}changed();
         try {
@@ -108,7 +109,24 @@ public final class JieliSession {
     public long connectionId(){synchronized(sessionLock){return generation;}}
     public boolean isCurrent(CtpClient owner){return owner!=null&&ctp==owner&&connected();}
     public JSONObject command(String topic,String op,JSONObject params)throws Exception {return command(ctp,topic,op,params);}
-    public JSONObject command(CtpClient c,String topic,String op,JSONObject params)throws Exception {if(!isCurrent(c))throw new IOException("Подключение изменилось. Подключите видеорегистратор заново");try{return c.request(topic,op,params,15);}catch(CtpClient.DeviceException e){if(isCurrent(c)){if(e.code==6){unsupported.add(topic);changed();}if(e.code==15||e.code==16){state.put("PULL_VIDEO_STATUS",params("status","0"));changed();}}throw e;}}
+    public JSONObject command(CtpClient c,String topic,String op,JSONObject params)throws Exception {if(cardFormatting()&&!Set.of("CLOSE_RT_STREAM","CLOSE_PULL_RT_STREAM").contains(topic))throw new IOException("Дождитесь завершения форматирования microSD");if(!isCurrent(c))throw new IOException("Подключение изменилось. Подключите видеорегистратор заново");try{return c.request(topic,op,params,15);}catch(CtpClient.DeviceException e){if(isCurrent(c)){if(e.code==6){unsupported.add(topic);changed();}if(e.code==15||e.code==16){state.put("PULL_VIDEO_STATUS",params("status","0"));changed();}}throw e;}}
+    public boolean cardFormatting(){return formattingOwner!=null;}
+    public long cardContentVersion(){return permissionContext.getSharedPreferences("devices",0).getLong("cardContent."+deviceIdentity(),0);}
+    void beginCardFormat(CtpClient owner)throws IOException {synchronized(sessionLock){if(!isCurrent(owner))throw new IOException("Подключение изменилось");if(cardFormatting())throw new IOException("Форматирование уже выполняется");if(!cardKnown()||!cardPresent())throw new IOException("microSD не установлена или её состояние ещё не получено");if(TransferService.active)throw new IOException("Сначала остановите скачивание с регистратора");formattingOwner=owner;formatStatus="Подготовка к форматированию microSD…";}changed();}
+    void formatCard(CtpClient owner)throws Exception {boolean issued=false;String identity=deviceIdentity();
+        try{if(formattingOwner!=owner||!isCurrent(owner)||!cardPresent())throw new IOException("Подключение или состояние microSD изменилось");if(TransferService.active)throw new IOException("Сначала остановите скачивание с регистратора");
+            JSONObject record=state.get("VIDEO_CTRL");if(record==null||!record.has("status"))record=owner.request("VIDEO_CTRL","GET",null,5);
+            if("1".equals(record.optString("status"))){JSONObject stopped=owner.request("VIDEO_CTRL","PUT",params("status","0"),10);if(!"0".equals(stopped.optString("status")))throw new IOException("Регистратор не подтвердил остановку записи");}
+            else if(!"0".equals(record.optString("status")))throw new IOException("Не удалось проверить состояние записи регистратора");
+            if(!isCurrent(owner)||!cardPresent())throw new IOException("Подключение или состояние microSD изменилось");
+            formatStatus="Форматируем microSD… Не отключайте питание регистратора";changed();issued=true;
+            permissionContext.getSharedPreferences("devices",0).edit().putLong("cardContent."+identity,cardContentVersion()+1).apply();
+            JSONObject result=owner.formatCard();if("0".equals(result.optString("frm")))throw new CtpClient.DeviceException(1,"FORMAT","Не удалось отформатировать microSD");if(!"1".equals(result.optString("frm")))throw new IOException("Нет подтверждения завершения форматирования");
+            formatStatus="microSD отформатирована. Запись на регистраторе остановлена";Diag.log("CARD FORMAT","Confirmed success");state.remove("TF_CAP");
+            for(String topic:new String[]{"SD_STATUS","TF_CAP"})if(isCurrent(owner))try{owner.request(topic,"GET",null,3);}catch(Exception e){Diag.error("Refresh after format: "+topic,e);}
+        }catch(Exception e){formatStatus=issued&&!(e instanceof CtpClient.DeviceException)?"Форматирование не подтверждено. Результат неизвестен: проверьте карту после подключения. Повтор автоматически не отправлялся":"Форматирование не выполнено: "+e.getMessage();Diag.error("Card format",e);throw e;}
+        finally{synchronized(sessionLock){if(formattingOwner==owner)formattingOwner=null;}changed();}
+    }
     public static JSONObject params(String...pairs)throws JSONException {JSONObject p=new JSONObject();for(int i=0;i<pairs.length;i+=2)p.put(pairs[i],pairs[i+1]);return p;}
     static void validateHost(String host)throws IOException{
         if(!host.matches("[0-9.]+"))throw new IOException("Нужен IPv4-адрес регистратора");
@@ -116,6 +134,7 @@ public final class JieliSession {
         if(!(a instanceof Inet4Address)||(!a.isSiteLocalAddress()&&!a.isLinkLocalAddress()&&!a.isLoopbackAddress()))throw new IOException("Нужен адрес в локальной сети");
     }
     public URL url(String path)throws Exception {
+        if(cardFormatting())throw new IOException("Дождитесь завершения форматирования microSD");
         if(path==null||path.isBlank())throw new IOException("Пустой путь к файлу");
         if(path.startsWith("http://")){URI u=new URI(path);if(!host.equals(u.getHost())||u.getPort()!=8080)throw new IOException("Регистратор прислал посторонний адрес");return u.toURL();}
         if(path.contains("://"))throw new IOException("Неверный путь регистратора");
@@ -146,5 +165,5 @@ public final class JieliSession {
         for(int i=0;i<a.length();i++)list.add(new MediaItem(a.getJSONObject(i),camera));
         list.sort(MediaItem.newestFirst());return list;
     }
-    public String report(){return "Zem iBox "+BuildConfig.VERSION_NAME+"\n"+Build.MANUFACTURER+" "+Build.MODEL+" Android "+Build.VERSION.RELEASE+" API "+Build.VERSION.SDK_INT+"\nloggingEnabled="+Diag.enabled()+"\ndestructiveActions="+BuildConfig.ALLOW_DESTRUCTIVE_ACTIONS+"\nstatus="+status+"\nhost="+host+"\nnetwork="+network+"\ndescription="+description+"\nstate="+state+"\n";}
+    public String report(){return "Zem iBox "+BuildConfig.VERSION_NAME+"\n"+Build.MANUFACTURER+" "+Build.MODEL+" Android "+Build.VERSION.RELEASE+" API "+Build.VERSION.SDK_INT+"\nloggingEnabled="+Diag.enabled()+"\ndestructiveActions="+BuildConfig.ALLOW_DESTRUCTIVE_ACTIONS+"\nconfirmedCardFormat=true\ncardFormatting="+cardFormatting()+"\ncardFormatStatus="+formatStatus+"\nstatus="+status+"\nhost="+host+"\nnetwork="+network+"\ndescription="+description+"\nstate="+state+"\n";}
 }

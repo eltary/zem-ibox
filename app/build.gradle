@@ -8,8 +8,8 @@ android {
         applicationId 'io.zem.ibox'
         minSdk 30
         targetSdk 36
-        versionCode 18
-        versionName '0.0.13'
+        versionCode 19
+        versionName '0.0.14'
         buildConfigField 'boolean', 'ALLOW_DESTRUCTIVE_ACTIONS', allowDestructiveActions.toString()
         testInstrumentationRunner 'io.zem.ibox.SmokeTest'
     }
