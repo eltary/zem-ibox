@@ -1,137 +1,143 @@
 # Zem iBox
 
-Work from the root of this repository under WSL/Linux. Do not create a
-second project checkout in the former Windows workspace.
+## Рабочая среда и подпись
 
-Android applicationId/namespace: io.zem.ibox. Display name: Zem iBox.
-Use the existing shared owner-managed key ~/zem-android-sign/signing.properties
-for both debug and release. On 20.10.2026 the user explicitly requested the
-debug certificate supplied in that directory instead of the initial Zem key.
-Pin the actual public certificate in docs/signing-certificate.json and verify
-the built APK against its SHA-256; never silently accept another signer.
-Release builds must remain non-debuggable.
-Never generate a replacement key or commit/print the keystore/passwords.
+Работай из корня этого репозитория в WSL/Linux. Не создавай вторую копию проекта
+в прежней рабочей папке Windows.
 
-Use ./gradlew for Linux builds. Android SDK is configured in ignored
-local.properties; default WSL SDK is ~/.cache/android-sdk.
-Keep only active sources, tests and documentation in Git. Baselines, retired
-experiments, APKs and generated reports were removed at the user's request.
-Use ignored release/ for distributable builds, qa/generated/ for fixtures,
-qa/reports/ for test results, and runs/ for temporary private task files.
-Do not commit personal workstation paths, personal contact details or delivery
-receipts. Attribute commits to the owner’s public GitHub profile using the
-GitHub-provided noreply address; never publish a private email. Write commit
-messages in Russian.
-Keep destructive commands disabled unless the user explicitly changes that.
-On 04.11.2026 the user explicitly enabled DVR microSD formatting. Keep it behind
-its dedicated confirmation and captured-session path; generic FORMAT, file
-deletion and factory reset stay blocked in default builds.
-Only emulator-5586 belongs to this project; never operate on other emulators.
+Пакет и пространство имён Android: `io.zem.ibox`. Название приложения: Zem iBox.
+Для отладочных и релизных сборок используй существующий общий ключ владельца
+из `~/zem-android-sign/signing.properties`. По указанию владельца от 20.10.2026
+используется предоставленный сертификат Android Debug вместо первоначального Zem.
+Публичный сертификат закреплён в `docs/signing-certificate.json`; сверяй SHA-256
+собранного APK с ним. Релизные APK должны оставаться неотладочными.
+Не создавай новый ключ, не меняй сертификат без отдельного указания и не публикуй
+хранилище ключа или пароли. Конфигурация подписи подключается через
+`~/zem-android-sign/zem-signing.gradle`.
+
+Собирай через `./gradlew`. Android SDK задан в игнорируемом `local.properties`;
+обычный путь в WSL — `~/.cache/android-sdk`.
+В Git должны оставаться актуальные исходники, тесты и документация.
+Старые APK, baselines, выведенные из использования эксперименты и накопленные
+отчёты удалены по просьбе владельца. Готовые сборки помещай в игнорируемый
+`release/`, тестовые медиа — в `qa/generated/`, отчёты — в `qa/reports/`,
+временные служебные материалы — в `runs/`.
+Не публикуй личные контакты, пути к папкам компьютера или квитанции отправки.
+В авторе и коммитере используй публичный ник владельца GitHub с пустым полем
+электронной почты. Сообщения коммитов пиши по-русски.
+
+Опасные команды должны быть отключены, пока владелец явно не разрешит их.
+04.11.2026 владелец разрешил форматирование microSD регистратора: оно проходит
+только через отдельное подтверждение и привязано к исходному сеансу устройства.
+Общие команды FORMAT, удаления файлов и заводского сброса остаются заблокированы.
+Проекту принадлежит только `emulator-5586`; другие эмуляторы не трогай.
 
 ## Версионирование — правило пользователя
 
-- Первая версия — `0.0.1`. По явному указанию пользователя 20.10.2026
-  нумерация Zem iBox начинается заново с `0.0.1`, затем `0.0.2`, `0.0.3` и далее.
+- Первая версия — `0.0.1`. По указанию от 20.10.2026 нумерация начинается заново:
+  `0.0.1`, `0.0.2`, `0.0.3` и далее.
 - Каждый завершённый согласованный набор изменений, включая код, конфигурацию
   и документацию, повышает версию ровно на один шаг. Несколько файлов одного
   набора и промежуточные сохранения не дают отдельных повышений.
 - Формат `major.minor.patch`, без ведущих нулей. `minor` и `patch` — от 0 до 99:
   `0.0.99 → 0.1.0`, `0.99.99 → 1.0.0`, `1.99.99 → 2.0.0` и далее.
-  Старший разряд не ограничен 99. Не выбирать major/minor произвольно по SemVer.
-- Обычная повторная сборка, проверка или запуск без изменений версию не повышает.
-- Источник версии — `app/build.gradle`. До сборки и передачи нового выпуска
-  синхронизировать `versionName`, CHANGELOG и имена выдаваемых APK;
-  проверки должны подтверждать версию именно собранного файла.
-- Android `versionCode` всегда увеличивать для нового выпуска того же пакета,
-  независимо от отображаемой версии. При сбросе `versionName` с `0.1.4` на
-  `0.0.1` используется `versionCode = 6`, чтобы сохранить обновление поверх
-  уже выданной сборки с кодом 5. Повторная сборка код не повышает.
-- Каждый новый выпуск записывать в `CHANGELOG.md`. Исторические версии,
-  baseline, отчёты и ранее выданные APK не перенумеровывать задним числом.
+  Старший разряд не ограничен 99. Не выбирай major/minor произвольно по SemVer.
+- Повторная сборка, проверка или запуск без изменений версию не повышает.
+- Источник версии — `app/build.gradle`. Перед сборкой и передачей нового выпуска
+  синхронизируй `versionName`, CHANGELOG и имена APK. Проверки должны сверять
+  версию именно собранного файла. README не содержит номера текущей версии.
+- Для нового выпуска того же пакета всегда повышай Android `versionCode`,
+  независимо от отображаемой версии. При сбросе с `0.1.4` на `0.0.1` использован
+  код 6 для обновления поверх кода 5. Повторная сборка код не повышает.
+- Каждый новый выпуск записывай в `CHANGELOG.md`. Не перенумеровывай задним числом
+  исторические версии, отчёты и ранее выданные APK.
 
-## UI, playback and compatibility
+## Интерфейс, воспроизведение и совместимость
 
-- Keep preview at the top and use grouped control tabs; switching camera
-  control sections must preserve the active Surface and stream.
-- Rear-camera controls default to hidden. Device description quality arrays
-  do not prove physical camera presence; store the user's choice per device.
-- Device compatibility is protocol/capability based. Do not advertise untested
-  brands or full original-app parity; maintain docs/COMPATIBILITY.md.
-- DVR HTTP playback uses bundled libVLC through a private Wi-Fi-bound relay.
-  Never bind the entire process to Wi-Fi for native playback. Phone videos open in the internal player by default;
-  the row menu retains the system chooser and external VLC.
-- libVLC is pinned to 3.7.7. Preserve LGPL notices/source links and review any
-  native dependency change. Published releases include separate arm64-v8a, armeabi-v7a, x86 and x86_64
-  APKs plus a universal APK;
-  pass -Pzem.abis=x86_64 for this project's emulator QA builds.
-- No letters (especially Z) in the launcher icon. Keep adaptive and monochrome
-  versions, and inspect the real Android icon at small size.
-- The launcher brand mark must be an abstract road/motion symbol with no
-  camera housing, lens, eyes or face. This user correction supersedes the
-  former camera/road direction. Keep color and monochrome artwork aligned.
+- Предпросмотр камеры расположен сверху, управление разделено на группы.
+  Переключение групп не должно пересоздавать Surface или прерывать поток.
+- Задняя камера по умолчанию скрыта. Массивы качества в описании устройства
+  не доказывают её наличие. Выбор пользователя сохраняется отдельно для устройства.
+- Совместимость определяется протоколом и возможностями прошивки. Не обещай
+  поддержку непроверенных марок или всех функций оригинального приложения.
+  Ограничения фиксируются в `docs/COMPATIBILITY.md`.
+- Записи регистратора воспроизводятся встроенным libVLC через отдельный ретранслятор,
+  привязанный к Wi-Fi. Никогда не привязывай весь процесс к сети регистратора.
+  Видео на телефоне по нажатию открывается во внутреннем плеере;
+  системный выбор приложения и внешний VLC остаются в меню файла.
+- libVLC закреплён на 3.7.7. Сохраняй уведомления LGPL и ссылки на исходники;
+  отдельно проверяй любое изменение нативных зависимостей.
+  Выпускай APK для arm64-v8a, armeabi-v7a, x86, x86_64 и universal.
+  Для тестовых сборок эмулятора используй `-Pzem.abis=x86_64`.
+- На значке приложения не должно быть букв, особенно Z. Сохраняй адаптивный
+  и одноцветный варианты, проверяй реальный значок Android в маленьком размере.
+- Фирменный знак — абстрактная дорога и движение: без корпуса камеры, объектива,
+  глаз или лица. Это указание заменяет прежнее направление с камерой.
+  Цветное и одноцветное изображения должны соответствовать друг другу.
 
-## Visual system
+## Визуальная система
 
-- Use Ui.java for shared colors, native widgets, line icons, outlines,
-  typography and selection states. Keep the graphite/cyan/mint palette
-  consistent with the launcher artwork. Prefer native drawables over Unicode
-  symbols for navigation and action icons.
-- Camera preview stays first; its controls are grouped in a segmented bar.
-  Keep Android insets, readable disabled/empty states and touch targets.
-- Separate Settings into DVR and App sections. Do not recreate a long mixed
-  list of unrelated buttons on the live page.
-- Inspect actual Android screenshots at normal size and 320dp with font 130%.
-  Visual updates must preserve stream/surface continuity and existing actions.
+- Общие цвета, виджеты, линейные иконки, рамки, типографика и состояния выбора
+  определяются в `Ui.java`. Сохраняй графитовую, бирюзовую и мятную палитру.
+  Для навигации и действий используй рисованные иконки, а не символы Unicode.
+- Предпросмотр камеры остаётся первым; группы управления переключаются сегментами.
+  Учитывай системные отступы Android, читаемость недоступных и пустых состояний,
+  достаточный размер зон нажатия.
+- В настройках разделяй «Регистратор» и «Приложение». Не возвращай длинный
+  смешанный список действий и параметров на экран камеры.
+- Визуальные изменения проверяй на реальных снимках Android при обычном размере,
+  а также при ширине 320 dp и масштабе шрифта 130%. Они не должны прерывать поток.
 
-## Usability
+## Удобство и безопасность действий
 
-- Give archive loading, failures, no card, empty folders and filtered results
-  distinct messages and an actionable recovery path. Ignore stale results
-  after the session/camera changes; preserve the existing list on refresh failure.
-- Every media row has a visible actions menu. Long press is only a shortcut.
-- Show elapsed time while recording to phone. Ask before user navigation,
-  quality/camera changes, fullscreen or disconnect ends that recording.
-  Lifecycle interruption still finalizes the file automatically.
-- Text action rows use wrap_content with at least 48 dp touch targets.
-  Check 320 dp at font scales 1.3 and 2.0; camera content scrolls as one page.
-- Connection help must offer Wi-Fi selection and retry without requesting
-  SSID/location permissions or creating an automatic reconnect loop.
+- Различай загрузку архива, ошибку, отсутствие карты, пустую папку и пустой
+  результат фильтра. Давай понятный способ продолжить. Игнорируй запоздалые
+  ответы после смены подключения или камеры; ошибка обновления не стирает список.
+- У каждого файла есть видимое меню действий. Долгое нажатие — дополнительный способ.
+- При записи на телефон показывай прошедшее время. Перед переходом, сменой
+  качества или камеры, полным экраном и отключением спрашивай о завершении записи.
+  При системном прерывании файл всё равно должен автоматически завершаться.
+- Текстовые кнопки растут по содержимому, зона нажатия — не меньше 48 dp.
+  Проверяй ширину 320 dp со шрифтами 130% и 200%; камера прокручивается одной страницей.
+- Помощь с подключением предлагает выбор Wi-Fi и повтор без доступа к SSID,
+  геолокации и бесконечного автоматического переподключения.
+- Называй места записи явно: «На видеорегистратор» и «На телефон».
+  Не используй неоднозначное «На карту» для записи регистратора.
+- Параметры регистратора доступны только при текущем подключении, действия с картой —
+  при подтверждённом наличии microSD. Лайв и сохранение на телефон требуют видео,
+  но не карты. После извлечения карты должна оставаться возможность остановить
+  запись регистратора. Локальные файлы и настройка подключения доступны без сети.
+  Закрывай устаревшие диалоги; отложенные команды и чтение файлов привязывай
+  к захваченному исходному сеансу.
+- Миниатюры загружаются вне главного потока с ограниченными чтением и кэшем.
+  Чтение регистратора идёт через исходные Wi-Fi и сеанс; при открытом плеере
+  работа с миниатюрами приостановлена. Игнорируй ответы для переиспользованных строк.
+- Предыдущее и следующее видео, а также список плеера следуют снимку текущего
+  отфильтрованного списка без фотографий. Не передавай большой архив через Intent.
+  Очередь регистратора не переносится на другое подключение; локальная работает без сети.
+- По указанию от 04.11.2026 видео на телефоне по умолчанию запускает внутренний
+  последовательный плеер. Системный выбор и внешний VLC сохраняются в меню.
+- Проверка архивного плеера должна подтверждать видимые изменяющиеся кадры,
+  а не только часы или найденную дорожку. Используй длинный Full HD MOV с индексом
+  в конце, перемотку и восстановление вывода. Контроль кадров TextureView ограничен
+  по времени, учитывает паузу и буферизацию; смена декодера сохраняет позицию и скорость.
+- Сетевой ретранслятор проверяет размер и диапазоны файла, ограничивает чтение
+  и продолжает его после обрыва без повтора байтов. Перемотка или отмена потребителя
+  отличаются от ошибки чтения устройства. Не меняй сеть или сеанс незаметно.
 
-- Name recording destinations explicitly: «На видеорегистратор» and
-  «На телефон». Do not use the ambiguous «На карту» for DVR recording.
+## Документация и настройки по умолчанию
 
-- Gate DVR settings on the current connection and card operations on a known,
-  present microSD. Live/phone saving need video, not SD. Allow stopping an
-  existing DVR recording after SD removal. Local files and connection setup
-  stay available offline. Close obsolete device dialogs and bind queued
-  commands/file reads to their captured session before sending anything.
-
-- Archive/phone thumbnails load off the UI thread with bounded read/cache sizes.
-  Keep DVR reads on the captured Wi-Fi/session; pause thumbnail work while
-  the player is foreground, and ignore callbacks for recycled rows.
-- In-player previous/next/list navigation follows the filtered video snapshot,
-  excluding photos. Never pass a large archive through Intent extras. A DVR
-  queue cannot migrate to a new connection; phone queues work offline.
-- On 04.11.2026 the user changed the phone video default to the internal
-  sequential player. The Android chooser and external VLC remain in the menu.
-
-- Archive playback QA must verify changing visible video pixels, not only an
-  advancing clock or a detected track. Include a long Full HD MOV with a tail
-  index, seeks and output recovery. Keep the TextureView frame watchdog bounded;
-  honour pauses/buffering and retain position/speed when changing decoder.
-- Wi-Fi playback relay validates file size/ranges, bounds upstream reads and
-  resumes read failures without repeating bytes. Consumer seek/cancellation is
-  distinct from a failed device read. Never change networks or sessions silently.
-
-## User-facing documentation and defaults
-
-- README deliberately has no current app version number; it links to the latest release.
-- Keep README, release descriptions and CHANGELOG readable for ordinary users.
-  Do not include test counts, release audit output, versionCode, signing-key continuity,
-  personal phone models or internal cleanup reports there. Developer instructions
-  and reproducible QA belong in docs/DEVELOPMENT.md and source scripts.
-- Diagnostic file/logcat recording defaults to off; preserve an explicitly saved choice.
-- Android minimum is API 24 (7.0). Guard newer platform APIs and test on API 24.
-- The owner recreated the repository as public on 04.11.2026. Keep only main
-  and the latest published release. Public GitHub profile attribution is allowed;
-  personal contacts, workstation paths and private email addresses stay excluded.
+- README не содержит номера текущей версии и ссылается на последний релиз.
+- README, описание релизов и CHANGELOG предназначены для обычных пользователей.
+  Не помещай туда количество проверок, внутренние отчёты, versionCode, упоминания
+  сохранения ключа подписи, модели личного телефона или отчёты о чистке проекта.
+  Инструкции разработчика и воспроизводимые проверки находятся в `docs/DEVELOPMENT.md`
+  и исходниках тестовых скриптов.
+- Запись диагностики в файлы и захват logcat по умолчанию выключены;
+  сохраняй явно выбранную пользователем настройку.
+- Минимальная версия ОС — Android 7.0, API 24. Новые платформенные API защищай
+  проверками версии и проверяй приложение на API 24.
+- 04.11.2026 владелец пересоздал репозиторий публичным. Оставляй только `main`
+  и последний опубликованный релиз. Публичный ник GitHub разрешён в авторстве Git
+  и адресах репозитория; поля электронной почты автора, коммитера и тегов пустые.
+  Личные контакты и пути к папкам компьютера в проект не попадают.

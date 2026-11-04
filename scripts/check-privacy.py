@@ -5,9 +5,11 @@ import subprocess,json,argparse,zipfile,re,sys
 p=argparse.ArgumentParser();p.add_argument('--deny-file',type=Path,required=True);p.add_argument('--history',action='store_true');p.add_argument('--apk-dir',type=Path);a=p.parse_args()
 terms=json.loads(a.deny_file.read_text());needles=[(t.encode().lower(),t.encode('utf-16le').lower()) for t in terms]
 def found(data,git_metadata=False):
-    # Public profile attribution is allowed; private email and source text remain checked.
+    # A public username with empty email is allowed only in Git identity headers.
     if git_metadata:
-        data=re.sub(rb'(?m)^(author|committer|tagger) ([A-Za-z0-9-]+) <[0-9]+\+\2@users[.]noreply[.]github[.]com> (?=[0-9]+ [+-][0-9]{4}$)',rb'\1 GITHUB_PROFILE <noreply@github.invalid> ',data)
+        headers,separator,body=data.partition(b'\n\n')
+        headers=re.sub(rb'(?m)^(author|committer|tagger) [A-Za-z0-9-]+ <> (?=[0-9]+ [+-][0-9]{4}$)',rb'\1 GITHUB_PROFILE <> ',headers)
+        data=headers+separator+body
     # The repository owner's GitHub URL is explicitly allowed. Other text is checked.
     data=re.sub(rb'https?://(?:api[.])?github[.]com/(?:repos/)?[^/\s"<>]+/',b'https://github.com/OWNER/',data,flags=re.I).lower()
     return any(x in data or y in data for x,y in needles)
