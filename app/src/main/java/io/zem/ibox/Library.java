@@ -43,6 +43,7 @@ public final class Library {
         return publish(c,file,name,mime,camera,()->false);
     }
     public static Uri publish(Context c,File file,String name,String mime,String camera,java.util.function.BooleanSupplier cancelled)throws Exception {
+        if(StorageLocation.tree(c)!=null)try{return StorageLocation.publish(c,file,name,mime,camera,cancelled);}catch(SecurityException|FileNotFoundException e){throw new IOException("Нет доступа к выбранной папке. Выберите её снова в настройках приложения",e);}
         if(!canPublish(c))throw new SecurityException("Для сохранения в Загрузки разрешите доступ к файлам");
         if(android.os.Build.VERSION.SDK_INT<29)return publishLegacy(c,file,name,mime,camera,cancelled);
         ContentValues values=new ContentValues();values.put(MediaStore.MediaColumns.DISPLAY_NAME,name);values.put(MediaStore.MediaColumns.MIME_TYPE,mime);values.put(MediaStore.MediaColumns.RELATIVE_PATH,"Download/Zem iBox Drive/"+camera);values.put(MediaStore.MediaColumns.IS_PENDING,1);
@@ -51,7 +52,7 @@ public final class Library {
         try{try(InputStream in=new FileInputStream(file);OutputStream out=cr.openOutputStream(uri,"w")){if(out==null)throw new IOException("Нет доступа к файлу");byte[] buffer=new byte[128*1024];int n;while((n=in.read(buffer))!=-1){if(cancelled.getAsBoolean())throw new InterruptedIOException("Загрузка отменена");out.write(buffer,0,n);}if(cancelled.getAsBoolean())throw new InterruptedIOException("Загрузка отменена");}values.clear();values.put(MediaStore.MediaColumns.IS_PENDING,0);cr.update(uri,values,null,null);success=true;Diag.log("STORAGE","Published "+uri+" "+name+" bytes="+file.length());return uri;}
         finally{if(!success)cr.delete(uri,null,null);}
     }
-    static boolean canPublish(Context c){return android.os.Build.VERSION.SDK_INT>=29||c.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)==android.content.pm.PackageManager.PERMISSION_GRANTED;}
+    static boolean canPublish(Context c){return StorageLocation.tree(c)!=null||android.os.Build.VERSION.SDK_INT>=29||c.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)==android.content.pm.PackageManager.PERMISSION_GRANTED;}
     @SuppressWarnings("deprecation")
     private static Uri publishLegacy(Context c,File source,String name,String mime,String camera,java.util.function.BooleanSupplier cancelled)throws Exception {
         File root=new File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),"Zem iBox Drive").getCanonicalFile();

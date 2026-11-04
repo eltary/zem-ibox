@@ -13,6 +13,7 @@
         <activity android:name=".MainActivity" android:exported="true" android:configChanges="orientation|screenSize|keyboardHidden">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
         </activity>
+        <activity android:name=".DownloadsActivity" android:exported="false" />
         <activity android:name=".PlayerActivity" android:exported="false" android:configChanges="orientation|screenSize"/>
         <provider android:name=".DiagnosticProvider" android:authorities="${applicationId}.diagnostics" android:exported="false" android:grantUriPermissions="true"/>
         <provider android:name=".UpdateProvider" android:authorities="${applicationId}.updates" android:exported="false" android:grantUriPermissions="true"/>

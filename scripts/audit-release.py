@@ -28,7 +28,10 @@ assert "android.permission.REQUEST_INSTALL_PACKAGES" in permissions
 assert int(manifest.find('uses-sdk').attrib[ns+'minSdkVersion'])==24
 for permission in manifest.findall('uses-permission'):
     if permission.attrib[ns+'name'] in {'android.permission.READ_EXTERNAL_STORAGE','android.permission.WRITE_EXTERNAL_STORAGE'}:assert permission.attrib[ns+'maxSdkVersion']=='28'
-assert len(application.findall('activity'))==2 and len(application.findall('service'))==1
+assert len(application.findall('activity'))==3 and len(application.findall('service'))==1
+assert {x.attrib[ns+'name'] for x in application.findall('activity')}=={'io.zem.ibox.MainActivity','io.zem.ibox.PlayerActivity','io.zem.ibox.DownloadsActivity'}
+for x in application.findall('activity'):
+    if x.attrib[ns+'name']!='io.zem.ibox.MainActivity':assert x.attrib[ns+'exported']=='false'
 providers=application.findall('provider');assert len(providers)==2
 expected_providers={'io.zem.ibox.DiagnosticProvider':'io.zem.ibox.diagnostics','io.zem.ibox.UpdateProvider':'io.zem.ibox.updates'}
 for provider in providers:

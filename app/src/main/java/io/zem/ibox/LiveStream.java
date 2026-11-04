@@ -41,6 +41,8 @@ public final class LiveStream implements LiveSource {
     public LiveStream(JieliSession session,Surface surface,int camera,int level,LiveSource.Listener listener){this.session=session;this.owner=session.ctp;this.wifi=session.network;this.host=session.host;this.description=session.description;this.tcpTransport=session.liveTransport().equals("tcp");this.surface=surface;this.camera=camera;this.level=level;this.listener=listener;}
     public void start(){new Thread(this::run,"Live receiver").start();}
     public void mute(boolean value){muted=value;Diag.log("LIVE","mute="+value);if(!value)ensureAudio();}
+    public void previewMode(int mode){displayClock.mode(mode);}
+    public boolean hasAudio(){return audioPackets>0;}
     public boolean hasVideo(){return running&&renderedFrames>0;}
     public boolean muted(){return muted;}
     private void run(){
@@ -88,7 +90,7 @@ public final class LiveStream implements LiveSource {
         }
     }
     private void renderLoop(){
-        try{while(running){LiveFrameQueue.Entry entry=previewQueue.poll(5);if(entry==null){synchronized(decodeLock){if(decoder!=null)drain();}continue;}previewDelayMs=(System.nanoTime()-entry.receivedNanos())/1_000_000;render(entry.frame(),entry.key(),entry.reset());}}
+        try{while(running){LiveFrameQueue.Entry entry=previewQueue.poll(5);if(entry==null){synchronized(decodeLock){if(decoder!=null)drain();}continue;}previewDelayMs=(System.nanoTime()-entry.receivedNanos())/1_000_000;displayClock.observe(entry.frame().presentationTimeUs(),entry.receivedNanos());render(entry.frame(),entry.key(),entry.reset());}}
         catch(InterruptedException ignored){Thread.currentThread().interrupt();}
         catch(Exception e){if(running){Diag.error("Live decoder",e);listener.status("Декодер: "+e.getMessage());running=false;closeSockets();}}
     }
@@ -96,6 +98,7 @@ public final class LiveStream implements LiveSource {
         synchronized(decodeLock){
             if(!running||!surface.isValid())return;
             if(f.type()==2){
+                long due=displayClock.target(f.presentationTimeUs(),System.nanoTime());while(running&&due>System.nanoTime()+1_000_000L)Thread.sleep(Math.min(10,Math.max(1,(due-System.nanoTime())/1_000_000)));if(!running)return;
                 Bitmap bmp=BitmapFactory.decodeByteArray(f.data(),0,f.data().length);if(bmp==null){Diag.log("JPEG","Decode returned null, size="+f.data().length);return;}
                 width=bmp.getWidth();height=bmp.getHeight();Canvas c=surface.lockCanvas(null);
                 try{c.drawColor(Color.BLACK);float scale=Math.min((float)c.getWidth()/width,(float)c.getHeight()/height);float w=width*scale,h=height*scale;c.drawBitmap(bmp,null,new RectF((c.getWidth()-w)/2,(c.getHeight()-h)/2,(c.getWidth()+w)/2,(c.getHeight()+h)/2),new Paint(Paint.FILTER_BITMAP_FLAG));}

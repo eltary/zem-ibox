@@ -1,0 +1,17 @@
+package io.zem.ibox;
+import android.provider.DocumentsContract.Root;import android.provider.DocumentsContract.Document;import android.database.*;import android.os.*;import android.provider.*;import java.io.*;
+/** Disposable DocumentsProvider exists only in the instrumentation APK. */
+public final class TestStorage extends DocumentsProvider {
+    public boolean onCreate(){return true;}
+    private File file(String id)throws FileNotFoundException{try{File root=new File(getContext().getCacheDir(),"documents").getCanonicalFile();root.mkdirs();File file=id.equals("root")?root:new File(root,id.substring("root/".length())).getCanonicalFile();if(!file.equals(root)&&!file.getPath().startsWith(root.getPath()+File.separator))throw new FileNotFoundException();return file;}catch(IOException|RuntimeException e){throw new FileNotFoundException();}}
+    public Cursor queryRoots(String[] projection){MatrixCursor out=new MatrixCursor(new String[]{Root.COLUMN_ROOT_ID,Root.COLUMN_DOCUMENT_ID,Root.COLUMN_TITLE,Root.COLUMN_FLAGS});out.addRow(new Object[]{"root","root","Test documents",Root.FLAG_SUPPORTS_CREATE|Root.FLAG_SUPPORTS_IS_CHILD});return out;}
+    private void row(MatrixCursor out,String id)throws FileNotFoundException{File f=file(id);out.addRow(new Object[]{id,f.getName(),f.isDirectory()?Document.MIME_TYPE_DIR: f.getName().endsWith(".jpg")?"image/jpeg":"video/mp4",f.length(),Document.FLAG_SUPPORTS_WRITE|Document.FLAG_SUPPORTS_DELETE|(f.isDirectory()?Document.FLAG_DIR_SUPPORTS_CREATE:0)});}
+    private MatrixCursor cursor(){return new MatrixCursor(new String[]{Document.COLUMN_DOCUMENT_ID,Document.COLUMN_DISPLAY_NAME,Document.COLUMN_MIME_TYPE,Document.COLUMN_SIZE,Document.COLUMN_FLAGS});}
+    public Cursor queryDocument(String id,String[] projection)throws FileNotFoundException{MatrixCursor out=cursor();row(out,id);return out;}
+    public Cursor queryChildDocuments(String id,String[] projection,String sort)throws FileNotFoundException{MatrixCursor out=cursor();File[] children=file(id).listFiles();if(children!=null)for(File child:children)row(out,id+"/"+child.getName());return out;}
+    public ParcelFileDescriptor openDocument(String id,String mode,CancellationSignal signal)throws FileNotFoundException{return ParcelFileDescriptor.open(file(id),ParcelFileDescriptor.parseMode(mode));}
+    public String createDocument(String parent,String mime,String name)throws FileNotFoundException{if(name.contains("/")||name.equals("..")||name.equals("."))throw new FileNotFoundException();File folder=file(parent);File next=new File(folder,name);for(int i=1;next.exists();i++)next=new File(folder,i+"-"+name);try{if(mime.equals(Document.MIME_TYPE_DIR)){if(!next.mkdir())throw new IOException();}else if(!next.createNewFile())throw new IOException();return parent+"/"+next.getName();}catch(IOException e){throw new FileNotFoundException();}}
+    public void deleteDocument(String id)throws FileNotFoundException{if(!file(id).delete())throw new FileNotFoundException();}
+    @android.annotation.TargetApi(26) public DocumentsContract.Path findDocumentPath(String parent,String child){java.util.ArrayList<String> path=new java.util.ArrayList<>();path.add("root");if(!child.equals("root")){String id="root";for(String part:child.substring(5).split("/")){id+="/"+part;path.add(id);}}return new DocumentsContract.Path("root",path);}
+    public boolean isChildDocument(String parent,String child){return child.startsWith(parent+"/");}
+}

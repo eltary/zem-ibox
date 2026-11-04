@@ -142,6 +142,8 @@ class HTTP(BaseHTTPRequestHandler):
             data=json.dumps({'requests':state.get('media_requests',0)}).encode()
         elif self.path=='/test/commands':
             with lock:data=json.dumps(dict(state['commands'],rtsp_video_setups=state.get('rtsp_video_setups',0),rtsp_audio_setups=state.get('rtsp_audio_setups',0))).encode()
+        elif self.path.startswith('/test/queue-item/'):
+            state['queue_item_time']=self.path.rsplit('/',1)[1];data=b'OK'
         elif self.path.startswith('/test/list/'):
             state['list_mode']=self.path.rsplit('/',1)[1];data=b'ok'
         elif self.path.startswith('/test/clock/'):
@@ -200,6 +202,7 @@ class HTTP(BaseHTTPRequestHandler):
             camera=1 if 'rear' in self.path else 0
             files=[{'f':f'/storage/sd0/C/DCIM/{camera}/clip.MOV','t':'20261019123456','s':len(VIDEO),'d':4,'y':2,'c':camera}]
             if mode=='multi':files=[{'f':'/storage/newest.MOV','t':'20261021123000','s':len(VIDEO),'d':4,'y':1},{'f':'/storage/middle.avi','t':'20261021122000','s':len(AVI),'d':4,'y':1},{'f':'/storage/oldest.MOV','t':'20261021121000','s':len(VIDEO),'d':4,'y':2},{'f':'/storage/photo.jpg','t':'20261021120000','s':len(JPEG),'y':3}]
+            if state.get('queue_item_time','0')!='0':files.append({'f':'/storage/queue-slow.MOV','t':state['queue_item_time'],'s':len(VIDEO),'d':4,'y':1,'c':camera})
             data=json.dumps({'file_list':files}).encode()
         elif self.path.startswith('/storage/fullhd'):
             path=ROOT/('fullhd-aac.mp4' if 'fullhd-aac' in self.path else 'fullhd.MOV')
@@ -227,6 +230,16 @@ class HTTP(BaseHTTPRequestHandler):
                     while remaining:
                         data=file.read(min(65536,remaining));self.wfile.write(data);self.wfile.flush();remaining-=len(data);written+=len(data)
                         if drop and written>=65536:self.connection.shutdown(socket.SHUT_RDWR);self.connection.close();return
+            except (BrokenPipeError,ConnectionResetError):pass
+            return
+        elif self.path.startswith('/storage/queue-slow'):
+            data=VIDEO;offset=0;rng=self.headers.get('Range')
+            if rng:offset=int(rng.split('=')[1].split('-')[0])
+            self.send_response(206 if rng else 200);self.send_header('Content-Length',str(len(data)-offset))
+            if rng:self.send_header('Content-Range',f'bytes {offset}-{len(data)-1}/{len(data)}')
+            self.end_headers()
+            try:
+                for start in range(offset,len(data),4096):self.wfile.write(data[start:start+4096]);self.wfile.flush();time.sleep(.04)
             except (BrokenPipeError,ConnectionResetError):pass
             return
         elif self.path.startswith('/storage/blocked-'):
