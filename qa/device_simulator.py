@@ -1,8 +1,8 @@
 """Local protocol fixture, not evidence of compatibility with a real iBOX."""
-import json, struct, socket, threading, time, pathlib, re
+import json, struct, socket, threading, time, pathlib, re, os
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-ROOT = pathlib.Path(__file__).resolve().parent / 'generated/fixtures'
+ROOT = pathlib.Path(__file__).resolve().parent / ('generated/readme' if os.environ.get('ZEM_README_FIXTURE')=='1' else 'generated/fixtures')
 VIDEO = (ROOT / 'test-clip.mp4').read_bytes()
 RAW = (ROOT / 'live.h264').read_bytes()
 PCM = (ROOT / 'audio.pcm').read_bytes()

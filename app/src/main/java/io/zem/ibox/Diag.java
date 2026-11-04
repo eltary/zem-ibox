@@ -13,10 +13,10 @@ public final class Diag {
     private static File dir;
     private static Process androidCapture;
     private static SharedPreferences preferences;
-    private static volatile boolean enabled=true;
+    private static volatile boolean enabled=false;
     private static final SimpleDateFormat clock = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS Z",Locale.ROOT);
     public static synchronized void init(Context c) {
-        dir=new File(c.getFilesDir(),"logs"); dir.mkdirs();preferences=c.getSharedPreferences("diagnostics",Context.MODE_PRIVATE);enabled=preferences.getBoolean("enabled",true);
+        dir=new File(c.getFilesDir(),"logs"); dir.mkdirs();preferences=c.getSharedPreferences("diagnostics",Context.MODE_PRIVATE);enabled=preferences.getBoolean("enabled",false);
         log("APP","START Zem iBox "+BuildConfig.VERSION_NAME+" Android "+Build.VERSION.RELEASE+" API "+Build.VERSION.SDK_INT+" "+Build.MANUFACTURER+" "+Build.MODEL+" ABIs="+Arrays.toString(Build.SUPPORTED_ABIS));
         Thread.UncaughtExceptionHandler previous=Thread.getDefaultUncaughtExceptionHandler();
         Thread.setDefaultUncaughtExceptionHandler((t,e)->{error("CRASH "+t.getName(),e);saveCrash("CRASH "+t.getName(),e); if(previous!=null)previous.uncaughtException(t,e);});
@@ -36,11 +36,12 @@ public final class Diag {
     private static void stopNativeCapture()throws IOException {
         if(androidCapture!=null){
             androidCapture.destroy();
-            try{if(!androidCapture.waitFor(1,java.util.concurrent.TimeUnit.SECONDS)){androidCapture.destroyForcibly();if(!androidCapture.waitFor(1,java.util.concurrent.TimeUnit.SECONDS))throw new IOException("Не удалось остановить запись системного журнала");}}
+            try{if(!waitForExit(androidCapture,1000)){if(Build.VERSION.SDK_INT>=26)androidCapture.destroyForcibly();else androidCapture.destroy();if(!waitForExit(androidCapture,1000))throw new IOException("Не удалось остановить запись системного журнала");}}
             catch(InterruptedException e){Thread.currentThread().interrupt();throw new IOException("Очистка логов прервана",e);}
             androidCapture=null;
         }
     }
+    private static boolean waitForExit(Process process,long timeout)throws InterruptedException{long end=android.os.SystemClock.elapsedRealtime()+timeout;do{try{process.exitValue();return true;}catch(IllegalThreadStateException running){Thread.sleep(20);}}while(android.os.SystemClock.elapsedRealtime()<end);return false;}
     public static synchronized void clear()throws IOException {
         String since=new SimpleDateFormat("MM-dd HH:mm:ss.SSS",Locale.ROOT).format(new Date());
         stopNativeCapture();

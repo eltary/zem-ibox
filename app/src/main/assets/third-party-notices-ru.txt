@@ -15,3 +15,11 @@ https://code.videolan.org/videolan/vlc
 Русский перевод: Елена Тяпкина, 20 марта 2002 года.
 Источник перевода: https://jxself.org/translations/lgpl-2.1.ru.shtml
 Ссылка GNU на перевод: https://www.gnu.org/licenses/old-licenses/lgpl-2.1-translations.ru.html
+
+Desugar JDK libraries 2.1.5 (Google / OpenJDK contributors)
+Совместимые реализации Java API для поддержки Android 7.
+Исходный код и лицензия (GPL v2 с исключением Classpath):
+https://github.com/google/desugar_jdk_libs
+https://github.com/google/desugar_jdk_libs/blob/ec1741f99ecc2c6595cd91e8f2c0f8298af03eed/LICENSE
+https://github.com/google/desugar_jdk_libs/blob/ec1741f99ecc2c6595cd91e8f2c0f8298af03eed/ASSEMBLY_EXCEPTION
+Оригиналы лицензий включены в приложение: desugar-LICENSE.txt, desugar-ASSEMBLY-EXCEPTION.txt, desugar-ADDITIONAL-LICENSE-INFO.txt

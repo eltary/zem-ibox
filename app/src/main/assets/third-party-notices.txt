@@ -8,3 +8,11 @@ https://code.videolan.org/videolan/vlc-android
 https://code.videolan.org/videolan/vlc
 Libraries are unmodified and dynamically linked as replaceable shared objects.
 AndroidX / Kotlin dependency notices are included in META-INF where supplied.
+
+Desugar JDK libraries 2.1.5 (Google / OpenJDK contributors)
+Backported Java APIs for Android 7 compatibility.
+Source and license notices (GPL v2 with the Classpath Exception):
+https://github.com/google/desugar_jdk_libs
+https://github.com/google/desugar_jdk_libs/blob/ec1741f99ecc2c6595cd91e8f2c0f8298af03eed/LICENSE
+https://github.com/google/desugar_jdk_libs/blob/ec1741f99ecc2c6595cd91e8f2c0f8298af03eed/ASSEMBLY_EXCEPTION
+Included notices: desugar-LICENSE.txt, desugar-ASSEMBLY-EXCEPTION.txt, desugar-ADDITIONAL-LICENSE-INFO.txt

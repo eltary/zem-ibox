@@ -6,19 +6,22 @@ android {
     compileSdk 36
     defaultConfig {
         applicationId 'io.zem.ibox'
-        minSdk 30
+        minSdk 24
         targetSdk 36
-        versionCode 21
-        versionName '0.0.16'
+        versionCode 22
+        versionName '0.0.17'
         buildConfigField 'boolean', 'ALLOW_DESTRUCTIVE_ACTIONS', allowDestructiveActions.toString()
         testInstrumentationRunner 'io.zem.ibox.SmokeTest'
     }
     buildFeatures { buildConfig true }
     defaultConfig { ndk { abiFilters.addAll((providers.gradleProperty('zem.abis').getOrElse('arm64-v8a,armeabi-v7a')).split(',') as List) } }
     packaging { jniLibs { useLegacyPackaging = true } }
-    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    compileOptions { coreLibraryDesugaringEnabled true; sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     buildTypes { release { minifyEnabled false } }
 }
 apply from: new File(System.getProperty('user.home'), 'zem-android-sign/zem-signing.gradle')
 
-dependencies { implementation 'org.videolan.android:libvlc-all:3.7.7' }
+dependencies {
+    implementation 'org.videolan.android:libvlc-all:3.7.7'
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs_nio:2.1.5'
+}

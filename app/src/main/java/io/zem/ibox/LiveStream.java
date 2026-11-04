@@ -14,6 +14,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 public final class LiveStream implements LiveSource {
+    private static int integer(MediaFormat format,String key,int fallback){return format.containsKey(key)?format.getInteger(key):fallback;}
     public interface Listener extends LiveSource.Listener {}
     private final JieliSession session;private final Network wifi;private final String host;private final JSONObject description;private final boolean tcpTransport;
     private final Surface surface;
@@ -134,7 +135,7 @@ public final class LiveStream implements LiveSource {
             }
             int i=decoder.dequeueOutputBuffer(info,0);
             if(i>=0){pendingOutput=i;pendingTarget=displayClock.target(info.presentationTimeUs,System.nanoTime());}
-            else if(i==MediaCodec.INFO_OUTPUT_FORMAT_CHANGED){MediaFormat fmt=decoder.getOutputFormat();int codedWidth=fmt.getInteger(MediaFormat.KEY_WIDTH,width),codedHeight=fmt.getInteger(MediaFormat.KEY_HEIGHT,height);width=fmt.containsKey("crop-right")?fmt.getInteger("crop-right")-fmt.getInteger("crop-left",0)+1:codedWidth;height=fmt.containsKey("crop-bottom")?fmt.getInteger("crop-bottom")-fmt.getInteger("crop-top",0)+1:codedHeight;decoder.setVideoScalingMode(MediaCodec.VIDEO_SCALING_MODE_SCALE_TO_FIT);updateRecordedFrameRate();Diag.log("CODEC FORMAT",fmt.toString());Diag.log("LIVE QUALITY","requested="+requestedWidth+"x"+requestedHeight+" actual="+width+"x"+height+" coded="+codedWidth+"x"+codedHeight);}else break;
+            else if(i==MediaCodec.INFO_OUTPUT_FORMAT_CHANGED){MediaFormat fmt=decoder.getOutputFormat();int codedWidth=integer(fmt,MediaFormat.KEY_WIDTH,width),codedHeight=integer(fmt,MediaFormat.KEY_HEIGHT,height);width=fmt.containsKey("crop-right")?fmt.getInteger("crop-right")-integer(fmt,"crop-left",0)+1:codedWidth;height=fmt.containsKey("crop-bottom")?fmt.getInteger("crop-bottom")-integer(fmt,"crop-top",0)+1:codedHeight;decoder.setVideoScalingMode(MediaCodec.VIDEO_SCALING_MODE_SCALE_TO_FIT);updateRecordedFrameRate();Diag.log("CODEC FORMAT",fmt.toString());Diag.log("LIVE QUALITY","requested="+requestedWidth+"x"+requestedHeight+" actual="+width+"x"+height+" coded="+codedWidth+"x"+codedHeight);}else break;
         }
     }
     private void updateRecordedFrameRate(){try{JSONObject recording=session.state.get("VIDEO_CTRL"),event=session.state.get("VIDEO_FINISH");if(recording==null||!"1".equals(recording.optString("status"))||event==null)return;JSONObject file=new JSONObject(event.optString("desc"));if(file.optInt("c",-1)==camera&&file.optInt("w")==width&&file.optInt("h")==height){int fps=file.optInt("p");if(fps>=10&&fps<=60){timing.sourceRate(fps,1);Diag.log("LIVE TIMING","Recording metadata rate="+fps+" fps");}}}catch(org.json.JSONException ignored){}}

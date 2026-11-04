@@ -61,7 +61,7 @@ public final class PlayerActivity extends Activity {
             restorePosition=saved==null?0:saved.getLong("position",0);if(saved!=null){float savedRate=saved.getFloat("speed",1f);for(float rate:SPEEDS)if(rate==savedRate)playbackRate=rate;}
         }catch(Exception e){error(e.getMessage());return;}
         LinearLayout root=column();root.setBackground(Ui.background());
-        root.setOnApplyWindowInsetsListener((v,i)->{android.graphics.Insets b=i.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout());v.setPadding(dp(16)+b.left,b.top+dp(6),dp(16)+b.right,b.bottom+dp(8));return i;});setContentView(root);
+        Platform.insets(this,root,dp(16),dp(6),dp(16),dp(8));setContentView(root);
         LinearLayout header=row();Button back=Ui.iconButton(this,"back","Назад к записям");back.setOnClickListener(v->finish());header.addView(back,new LinearLayout.LayoutParams(dp(48),dp(48)));
         title=text(videos.isEmpty()?getIntent().getStringExtra("name"):videos.get(videoIndex).name,16);title.setMaxLines(2);title.setEllipsize(TextUtils.TruncateAt.MIDDLE);header.addView(title,new LinearLayout.LayoutParams(0,-2,1));root.addView(header);
         status=text(deviceSource?"Просмотр по Wi-Fi · без скачивания":"Файл на телефоне",12);root.addView(status);if(deviceSource)session.listen(sourceObserver);

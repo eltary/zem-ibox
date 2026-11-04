@@ -38,7 +38,7 @@ Only emulator-5586 belongs to this project; never operate on other emulators.
   Старший разряд не ограничен 99. Не выбирать major/minor произвольно по SemVer.
 - Обычная повторная сборка, проверка или запуск без изменений версию не повышает.
 - Источник версии — `app/build.gradle`. До сборки и передачи нового выпуска
-  синхронизировать `versionName`, README, CHANGELOG и имена выдаваемых APK;
+  синхронизировать `versionName`, CHANGELOG и имена выдаваемых APK;
   проверки должны подтверждать версию именно собранного файла.
 - Android `versionCode` всегда увеличивать для нового выпуска того же пакета,
   независимо от отображаемой версии. При сбросе `versionName` с `0.1.4` на
@@ -120,3 +120,14 @@ Only emulator-5586 belongs to this project; never operate on other emulators.
 - Wi-Fi playback relay validates file size/ranges, bounds upstream reads and
   resumes read failures without repeating bytes. Consumer seek/cancellation is
   distinct from a failed device read. Never change networks or sessions silently.
+
+## User-facing documentation and defaults
+
+- README deliberately has no current app version number; it links to the latest release.
+- Keep README, release descriptions and CHANGELOG readable for ordinary users.
+  Do not include test counts, release audit output, versionCode, signing-key continuity,
+  personal phone models or internal cleanup reports there. Developer instructions
+  and reproducible QA belong in docs/DEVELOPMENT.md and source scripts.
+- Diagnostic file/logcat recording defaults to off; preserve an explicitly saved choice.
+- Android minimum is API 24 (7.0). Guard newer platform APIs and test on API 24.
+- The owner declined repository recreation and will decide public visibility themselves.

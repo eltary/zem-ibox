@@ -28,7 +28,7 @@ public final class TransferService extends Service {
     private volatile int batchTotal,batchFinished,batchFailed;
     public static void enqueue(Context c,MediaItem item)throws JSONException,IOException {
         if(c.checkSelfPermission("android.permission.INTERNET")!=android.content.pm.PackageManager.PERMISSION_GRANTED)throw new SecurityException("В тесте C нет разрешений; скачивание недоступно");
-        JieliSession source=requireSource();Intent intent=new Intent(c,TransferService.class).putExtra("sourceDevice",deviceKey(source)).putExtra("item",item.json().toString());c.startForegroundService(intent);
+        JieliSession source=requireSource();Intent intent=new Intent(c,TransferService.class).putExtra("sourceDevice",deviceKey(source)).putExtra("item",item.json().toString());start(c,intent);
     }
     public static void enqueueBatch(Context c,List<MediaItem> source)throws Exception {
         if(c.checkSelfPermission("android.permission.INTERNET")!=android.content.pm.PackageManager.PERMISSION_GRANTED)throw new SecurityException("В тесте C нет разрешений; скачивание недоступно");
@@ -36,11 +36,12 @@ public final class TransferService extends Service {
         JieliSession s=RoadApp.instance.session;JSONObject manifest=new JSONObject().put("device",deviceKey(s)).put("items",items);
         File dir=new File(c.getFilesDir(),"batches");dir.mkdirs();File file=File.createTempFile("batch-",".json",dir);
         try(FileOutputStream out=new FileOutputStream(file)){out.write(manifest.toString().getBytes(StandardCharsets.UTF_8));}
-        c.startForegroundService(new Intent(c,TransferService.class).putExtra("batch",file.getName()));
+        start(c,new Intent(c,TransferService.class).putExtra("batch",file.getName()));
     }
+    private static void start(Context c,Intent intent){if(Build.VERSION.SDK_INT>=26)c.startForegroundService(intent);else c.startService(intent);}
     private static JieliSession requireSource()throws IOException{JieliSession s=RoadApp.instance.session;if(!s.connected())throw new IOException("Сначала подключите видеорегистратор");if(!s.cardPresent())throw new IOException(s.cardKnown()?"В видеорегистраторе нет microSD":"Состояние microSD ещё не получено");return s;}
     private static String deviceKey(JieliSession s){long version=s.cardContentVersion();return s.deviceIdentity()+(version==0?"":"|card:"+version);}
-    public void onCreate(){super.onCreate();current=this;nm=getSystemService(NotificationManager.class);nm.createNotificationChannel(new NotificationChannel("downloads","Скачивание записей",NotificationManager.IMPORTANCE_LOW));}
+    public void onCreate(){super.onCreate();current=this;nm=getSystemService(NotificationManager.class);if(Build.VERSION.SDK_INT>=26)nm.createNotificationChannel(new NotificationChannel("downloads","Скачивание записей",NotificationManager.IMPORTANCE_LOW));}
     public synchronized int onStartCommand(Intent intent,int flags,int id){
         latestStartId=id;
         if(checkSelfPermission("android.permission.INTERNET")!=android.content.pm.PackageManager.PERMISSION_GRANTED){stopSelfResult(id);return START_NOT_STICKY;}
@@ -64,7 +65,7 @@ public final class TransferService extends Service {
                 transferThread=Thread.currentThread();
                 try{if(cancel)return;if(!origin.equals(deviceKey(RoadApp.instance.session)))throw new IOException("Подключён другой регистратор. Вернись к исходной сети");Diag.log("QUEUE ITEM",(batchFinished+1)+"/"+batchTotal+" "+item.time+" "+item.path);download(item,origin);}
                 catch(Exception e){if(cancel){Diag.log("DOWNLOAD","Cancelled; partial copy retained");}else{batchFailed++;Diag.error("Download "+item.path,e);if(!RoadApp.instance.session.connected()||!RoadApp.instance.session.cardPresent()||!origin.equals(deviceKey(RoadApp.instance.session)))cancel=true;progress=e.getMessage()+". Частичная копия сохранена; повторите скачивание для продолжения.";}RoadApp.instance.session.changed();}
-                finally{transferThread=null;Thread.interrupted();if(wake.isHeld())wake.release();synchronized(TransferService.this){batchFinished++;if(count.decrementAndGet()==0){active=false;if(cancel)progress="Загрузка отменена. Частичная копия сохранена для продолжения";else if(batchTotal>1)progress=batchFailed>0?"Очередь завершена · ошибок: "+batchFailed+". Повторите скачивание папки":"Папка скачана · файлов: "+batchTotal;Diag.log("QUEUE COMPLETE",progress);stopForeground(STOP_FOREGROUND_REMOVE);nm.cancel(15);if(checkSelfPermission("android.permission.POST_NOTIFICATIONS")==android.content.pm.PackageManager.PERMISSION_GRANTED)nm.notify(16,terminalNotification(progress));stopSelfResult(latestStartId);RoadApp.instance.session.changed();}}}
+                finally{transferThread=null;Thread.interrupted();if(wake.isHeld())wake.release();synchronized(TransferService.this){batchFinished++;if(count.decrementAndGet()==0){active=false;if(cancel)progress="Загрузка отменена. Частичная копия сохранена для продолжения";else if(batchTotal>1)progress=batchFailed>0?"Очередь завершена · ошибок: "+batchFailed+". Повторите скачивание папки":"Папка скачана · файлов: "+batchTotal;Diag.log("QUEUE COMPLETE",progress);stopForeground(STOP_FOREGROUND_REMOVE);nm.cancel(15);if(Build.VERSION.SDK_INT<33||checkSelfPermission("android.permission.POST_NOTIFICATIONS")==android.content.pm.PackageManager.PERMISSION_GRANTED)nm.notify(16,terminalNotification(progress));stopSelfResult(latestStartId);RoadApp.instance.session.changed();}}}
 
             });
             }
@@ -123,14 +124,15 @@ public final class TransferService extends Service {
         Library.add(this,uri,item.name,item.mime(),part.length(),item.path,key,item.date());part.delete();progress="Сохранено: "+item.name;RoadApp.instance.session.changed();
     }
     static String bytes(long n){if(n<=0)return "—";if(n<1024)return n+" Б";if(n<1048576)return String.format(Locale.getDefault(),"%.0f КБ",n/1024.0);if(n<1073741824)return String.format(Locale.getDefault(),"%.1f МБ",n/1048576.0);return String.format(Locale.getDefault(),"%.1f ГБ",n/1073741824.0);}
+    private Notification.Builder notificationBuilder(){return Build.VERSION.SDK_INT>=26?new Notification.Builder(this,"downloads"):new Notification.Builder(this).setPriority(Notification.PRIORITY_LOW);}
     private Notification notification(String text,long done,long total){
         PendingIntent open=PendingIntent.getActivity(this,0,new Intent(this,MainActivity.class),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
         PendingIntent stop=PendingIntent.getService(this,1,new Intent(this,TransferService.class).setAction("cancel"),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
-        Notification.Builder b=new Notification.Builder(this,"downloads").setSmallIcon(android.R.drawable.stat_sys_download).setContentTitle("Zem iBox").setContentText(text).setContentIntent(open).setOnlyAlertOnce(true).setOngoing(active).addAction(new Notification.Action.Builder(null,"Отменить",stop).build());
+        Notification.Builder b=notificationBuilder().setSmallIcon(android.R.drawable.stat_sys_download).setContentTitle("Zem iBox").setContentText(text).setContentIntent(open).setOnlyAlertOnce(true).setOngoing(active).addAction(new Notification.Action.Builder(null,"Отменить",stop).build());
         if(total>0)b.setProgress(100,(int)Math.min(100,done*100/total),false);else if(active)b.setProgress(0,0,true);return b.build();
     }
-    private Notification terminalNotification(String text){PendingIntent open=PendingIntent.getActivity(this,0,new Intent(this,MainActivity.class),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);return new Notification.Builder(this,"downloads").setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Zem iBox").setContentText(text).setStyle(new Notification.BigTextStyle().bigText(text)).setContentIntent(open).setAutoCancel(true).setOngoing(false).build();}
-    private void show(String text,long done,long total){if(cancel)return;progress=(batchTotal>1?(batchFinished+1)+"/"+batchTotal+" · ":"")+text;if(checkSelfPermission("android.permission.POST_NOTIFICATIONS")==android.content.pm.PackageManager.PERMISSION_GRANTED)nm.notify(15,notification(progress,done,total));RoadApp.instance.session.changed();}
+    private Notification terminalNotification(String text){PendingIntent open=PendingIntent.getActivity(this,0,new Intent(this,MainActivity.class),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);return notificationBuilder().setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Zem iBox").setContentText(text).setStyle(new Notification.BigTextStyle().bigText(text)).setContentIntent(open).setAutoCancel(true).setOngoing(false).build();}
+    private void show(String text,long done,long total){if(cancel)return;progress=(batchTotal>1?(batchFinished+1)+"/"+batchTotal+" · ":"")+text;if(Build.VERSION.SDK_INT<33||checkSelfPermission("android.permission.POST_NOTIFICATIONS")==android.content.pm.PackageManager.PERMISSION_GRANTED)nm.notify(15,notification(progress,done,total));RoadApp.instance.session.changed();}
     public void onTimeout(int startId,int fgsType){Diag.log("DOWNLOAD","Android dataSync timeout");requestCancel();stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();}
     public void onDestroy(){if(current==this){current=null;if(count.get()>0){cancel=true;abortRead();}}queue.shutdown();super.onDestroy();}
     public IBinder onBind(Intent intent){return null;}

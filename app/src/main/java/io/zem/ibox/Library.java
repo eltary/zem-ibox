@@ -43,10 +43,34 @@ public final class Library {
         return publish(c,file,name,mime,camera,()->false);
     }
     public static Uri publish(Context c,File file,String name,String mime,String camera,java.util.function.BooleanSupplier cancelled)throws Exception {
+        if(!canPublish(c))throw new SecurityException("Для сохранения в Загрузки разрешите доступ к файлам");
+        if(android.os.Build.VERSION.SDK_INT<29)return publishLegacy(c,file,name,mime,camera,cancelled);
         ContentValues values=new ContentValues();values.put(MediaStore.MediaColumns.DISPLAY_NAME,name);values.put(MediaStore.MediaColumns.MIME_TYPE,mime);values.put(MediaStore.MediaColumns.RELATIVE_PATH,"Download/Zem iBox Drive/"+camera);values.put(MediaStore.MediaColumns.IS_PENDING,1);
         ContentResolver cr=c.getContentResolver();Uri uri=cr.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI,values);if(uri==null)throw new IOException("Не удалось создать файл в Загрузках");
         boolean success=false;
         try{try(InputStream in=new FileInputStream(file);OutputStream out=cr.openOutputStream(uri,"w")){if(out==null)throw new IOException("Нет доступа к файлу");byte[] buffer=new byte[128*1024];int n;while((n=in.read(buffer))!=-1){if(cancelled.getAsBoolean())throw new InterruptedIOException("Загрузка отменена");out.write(buffer,0,n);}if(cancelled.getAsBoolean())throw new InterruptedIOException("Загрузка отменена");}values.clear();values.put(MediaStore.MediaColumns.IS_PENDING,0);cr.update(uri,values,null,null);success=true;Diag.log("STORAGE","Published "+uri+" "+name+" bytes="+file.length());return uri;}
         finally{if(!success)cr.delete(uri,null,null);}
     }
+    static boolean canPublish(Context c){return android.os.Build.VERSION.SDK_INT>=29||c.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)==android.content.pm.PackageManager.PERMISSION_GRANTED;}
+    @SuppressWarnings("deprecation")
+    private static Uri publishLegacy(Context c,File source,String name,String mime,String camera,java.util.function.BooleanSupplier cancelled)throws Exception {
+        File root=new File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),"Zem iBox Drive").getCanonicalFile();
+        File folder=new File(root,camera).getCanonicalFile();if(!folder.toPath().startsWith(root.toPath()))throw new IOException("Неверная папка записи");
+        if(!folder.isDirectory()&&!folder.mkdirs())throw new IOException("Не удалось создать папку в Загрузках");
+        String safe=new File(name).getName();if(safe.isEmpty()||safe.equals(".")||safe.equals(".."))throw new IOException("Неверное имя файла");
+        int dot=safe.lastIndexOf('.');String stem=dot>0?safe.substring(0,dot):safe,extension=dot>0?safe.substring(dot):"";
+        File target=null;for(int i=0;i<10000;i++){File candidate=new File(folder,stem+(i==0?"":" ("+i+")")+extension);if(candidate.createNewFile()){target=candidate;break;}}
+        if(target==null)throw new IOException("Не удалось выбрать имя файла");
+        File partial=new File(folder,".zem-"+UUID.randomUUID()+".partial");Uri uri=null;boolean success=false;
+        try{
+            try(InputStream in=new FileInputStream(source);OutputStream out=new FileOutputStream(partial)){byte[] bytes=new byte[128*1024];int n;while((n=in.read(bytes))!=-1){if(cancelled.getAsBoolean())throw new InterruptedIOException("Загрузка отменена");out.write(bytes,0,n);}}
+            if(cancelled.getAsBoolean())throw new InterruptedIOException("Загрузка отменена");
+            if(!partial.renameTo(target))throw new IOException("Не удалось завершить сохранение файла");
+            ContentValues values=new ContentValues();values.put(MediaStore.MediaColumns.DATA,target.getPath());values.put(MediaStore.MediaColumns.DISPLAY_NAME,target.getName());values.put(MediaStore.MediaColumns.MIME_TYPE,mime);values.put(MediaStore.MediaColumns.SIZE,target.length());
+            Uri collection=mime.startsWith("image/")?MediaStore.Images.Media.EXTERNAL_CONTENT_URI:MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
+            uri=c.getContentResolver().insert(collection,values);if(uri==null)throw new IOException("Не удалось добавить файл в медиатеку");
+            success=true;Diag.log("STORAGE","Published "+uri+" "+target.getName()+" bytes="+target.length());return uri;
+        }finally{partial.delete();if(!success){if(uri!=null)c.getContentResolver().delete(uri,null,null);target.delete();}}
+    }
+
 }

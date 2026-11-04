@@ -12,7 +12,6 @@
         <item name="android:navigationBarColor">#080F16</item>
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:windowBackground">#080F16</item>
-        <item name="android:windowLightNavigationBar">false</item>
     </style>
     <style name="ZemDialogTheme" parent="android:style/Theme.Material.Dialog.Alert">
         <item name="android:fontFamily">sans-serif</item>

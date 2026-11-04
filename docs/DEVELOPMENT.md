@@ -1,7 +1,7 @@
 # Сборка и тестирование
 
 Работайте из корня checkout в WSL/Linux. Пакет приложения: `io.zem.ibox`.
-Требуются Java 17, Android SDK 36 и Gradle Wrapper из проекта.
+Минимальная версия ОС — Android 7.0 (API 24). Требуются Java 17, Android SDK 36 и Gradle Wrapper из проекта.
 `ANDROID_HOME` или игнорируемый `local.properties` задают путь к SDK.
 
 ## Подпись
@@ -33,8 +33,7 @@ python3 scripts/audit-release.py --abis arm64-v8a --variant arm64-v8a
 ```
 
 Версия задаётся только в `app/build.gradle`. Каждое завершённое изменение
-повышает versionName на один шаг и Android versionCode. Синхронизируйте README
-и CHANGELOG. libVLC закреплён на 3.7.7; [происхождение](libvlc-provenance.json).
+повышает versionName на один шаг и Android versionCode. Обновляйте CHANGELOG; README не содержит номера текущей версии. libVLC закреплён на 3.7.7; [происхождение](libvlc-provenance.json).
 
 ## Проверки
 
@@ -75,3 +74,18 @@ python3 qa/run-format-audit.py
 В репозитории остаются актуальные исходники, тесты, скрипты, документация и
 скриншоты. Старые APK, baselines и выведенные из использования эксперименты
 не должны возвращаться в Git. Коммиты используют нейтральное имя проекта.
+
+## Android 7
+
+`desugar_jdk_libs_nio:2.1.5` переносит java.time, java.nio.file и используемые
+современные Java API на API 24. Локальные записи на API 24–28 публикуются в
+общую папку Download/Zem iBox Drive после запроса разрешения на файлы;
+на API 29+ используется MediaStore.Downloads без такого разрешения.
+Разрешения READ/WRITE_EXTERNAL_STORAGE ограничены maxSdkVersion 28.
+
+Сценарий `android7_only` запускается на чистой установке эмулятора API 24:
+он проверяет выключенную диагностику, запрос разрешения, сохранение оригинала,
+лайв, кадр, запись со звуком, внутренний плеер и обновление списка после удаления.
+Для скриншотов: `python3 qa/prepare-readme-fixture.py`, затем запуск симулятора
+с `ZEM_README_FIXTURE=1` и сценарий `readme_only`. Изображение дороги создано
+программно; это демонстрация интерфейса, не запись с физического устройства.

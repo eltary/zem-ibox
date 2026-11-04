@@ -10,7 +10,7 @@ version=re.search(r"^\s*versionName '([^']+)'\s*$",gradle,re.M).group(1)
 version_code=int(re.search(r'^\s*versionCode (\d+)\s*$',gradle,re.M).group(1))
 assert re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]?)\.(0|[1-9][0-9]?)',version)
 assert version_code>0
-assert ('Версия '+version) in (root/'README.md').read_text()
+assert not re.search(r'(?<![\w.])'+re.escape(version)+r'(?![\w.])',(root/'README.md').read_text())
 assert ('## '+version+' —') in (root/'CHANGELOG.md').read_text()
 signature=subprocess.check_output([str(sdk/'build-tools/36.0.0/apksigner'),'verify','--verbose','--print-certs',str(apk)],text=True)
 dn=re.search(r'certificate DN: (.+)',signature).group(1)
@@ -23,7 +23,10 @@ assert int(manifest.attrib[ns+'versionCode'])==version_code and manifest.attrib[
 assert application.attrib[ns+'label']=='Zem iBox'
 assert application.attrib.get(ns+'debuggable','false')=='false'
 permissions=sorted(p.attrib[ns+'name'] for p in manifest.findall('uses-permission'))
-assert len(permissions)==7
+assert len(permissions)==9
+assert int(manifest.find('uses-sdk').attrib[ns+'minSdkVersion'])==24
+for permission in manifest.findall('uses-permission'):
+    if permission.attrib[ns+'name'] in {'android.permission.READ_EXTERNAL_STORAGE','android.permission.WRITE_EXTERNAL_STORAGE'}:assert permission.attrib[ns+'maxSdkVersion']=='28'
 assert len(application.findall('activity'))==2 and len(application.findall('service'))==1
 providers=application.findall('provider');assert len(providers)==1
 assert providers[0].attrib[ns+'name']=='io.zem.ibox.DiagnosticProvider' and providers[0].attrib[ns+'exported']=='false' and providers[0].attrib[ns+'grantUriPermissions']=='true'
@@ -62,7 +65,7 @@ with zipfile.ZipFile(apk) as z,zipfile.ZipFile(aar) as upstream:
     assert {x['path'].split('/')[1] for x in native}==expected_abis
     assert len(native)==3*len(expected_abis)
     assets={p for p in z.namelist() if p.startswith('assets/')}
-    own_assets={'assets/libvlc-LICENSE.txt','assets/third-party-notices.txt','assets/libvlc-LICENSE-ru.txt','assets/third-party-notices-ru.txt'}
+    own_assets={'assets/libvlc-LICENSE.txt','assets/third-party-notices.txt','assets/libvlc-LICENSE-ru.txt','assets/third-party-notices-ru.txt','assets/desugar-LICENSE.txt','assets/desugar-ASSEMBLY-EXCEPTION.txt','assets/desugar-ADDITIONAL-LICENSE-INFO.txt'}
     vlc_assets={p for p in upstream.namelist() if p.startswith('assets/') and not p.endswith('/')}
     assert assets==own_assets|vlc_assets,assets
     for name in own_assets:assert z.read(name)==(root/'app/src/main'/name).read_bytes()

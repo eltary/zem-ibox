@@ -72,22 +72,23 @@ final class MediaThumbnails implements AutoCloseable {
         Bitmap bitmap=file.isFile()?BitmapFactory.decodeFile(file.getPath()):null;if(bitmap!=null)return bitmap;
         if(source.session==null){
             CancellationSignal signal=new CancellationSignal();active=signal::cancel;
-            try{bitmap=context.getContentResolver().loadThumbnail(Uri.parse(source.uri),new Size(WIDTH,HEIGHT),signal);}catch(Exception ignored){}finally{active=null;}
-            if(bitmap==null&&valid(request,source))try(MediaMetadataRetriever retriever=new MediaMetadataRetriever()){
-                retriever.setDataSource(context,Uri.parse(source.uri));bitmap=retriever.getScaledFrameAtTime(0,MediaMetadataRetriever.OPTION_CLOSEST_SYNC,WIDTH,HEIGHT);
-            }
+            try{if(android.os.Build.VERSION.SDK_INT>=29)bitmap=context.getContentResolver().loadThumbnail(Uri.parse(source.uri),new Size(WIDTH,HEIGHT),signal);}catch(Exception ignored){}finally{active=null;}
+            if(bitmap==null&&valid(request,source)){MediaMetadataRetriever retriever=new MediaMetadataRetriever();try{
+                retriever.setDataSource(context,Uri.parse(source.uri));bitmap=frame(retriever);
+            }finally{retriever.release();}}
         }else{
             try(RemoteData data=new RemoteData(source)){active=data;
                 if(source.mime.startsWith("image/")||source.mime.equals("video/x-msvideo"))bitmap=jpeg(data);
-                else try(MediaMetadataRetriever retriever=new MediaMetadataRetriever()){
-                    retriever.setDataSource(data);bitmap=retriever.getScaledFrameAtTime(0,MediaMetadataRetriever.OPTION_CLOSEST_SYNC,WIDTH,HEIGHT);
-                }
+                else {MediaMetadataRetriever retriever=new MediaMetadataRetriever();try{
+                    retriever.setDataSource(data);bitmap=frame(retriever);
+                }finally{retriever.release();}}
             }finally{active=null;}
         }
         if(bitmap==null||!valid(request,source))return null;
         Bitmap small=fit(bitmap);if(small!=bitmap)bitmap.recycle();
         File temporary=new File(folder,file.getName()+".tmp");try{try(FileOutputStream out=new FileOutputStream(temporary)){small.compress(Bitmap.CompressFormat.JPEG,82,out);}if(!temporary.renameTo(file))temporary.delete();trim();}catch(IOException e){temporary.delete();}return small;
     }
+    private static Bitmap frame(MediaMetadataRetriever retriever){return android.os.Build.VERSION.SDK_INT>=27?retriever.getScaledFrameAtTime(0,MediaMetadataRetriever.OPTION_CLOSEST_SYNC,WIDTH,HEIGHT):retriever.getFrameAtTime(0,MediaMetadataRetriever.OPTION_CLOSEST_SYNC);}
     private static Bitmap fit(Bitmap bitmap){float scale=Math.min(1f,Math.min(WIDTH/(float)bitmap.getWidth(),HEIGHT/(float)bitmap.getHeight()));return scale==1f?bitmap:Bitmap.createScaledBitmap(bitmap,Math.max(1,Math.round(bitmap.getWidth()*scale)),Math.max(1,Math.round(bitmap.getHeight()*scale)),true);}
     private static Bitmap jpeg(RemoteData data)throws IOException {
         ByteArrayOutputStream bytes=new ByteArrayOutputStream();byte[] block=new byte[16384];boolean started=false;int previous=-1;
