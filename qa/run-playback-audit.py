@@ -3,7 +3,7 @@ from pathlib import Path
 import json, subprocess, sys, argparse
 
 ROOT=Path(__file__).resolve().parents[1]
-OUT=ROOT/'qa/playback-0.0.13'
+OUT=ROOT/'qa/reports/playback'
 ADB=Path.home()/'.cache/android-sdk/platform-tools/adb'
 SERIAL='emulator-5586'
 
@@ -11,7 +11,7 @@ def adb(*args, **kwargs):
     return subprocess.run([str(ADB),'-s',SERIAL,*args],check=True,**kwargs)
 
 parser=argparse.ArgumentParser();parser.add_argument("--resume",action="store_true");parser.add_argument("--scenario",action="append");parser.add_argument("--mode",action="append");args=parser.parse_args()
-OUT.mkdir(exist_ok=True)
+OUT.mkdir(parents=True,exist_ok=True)
 for apk in ['app/build/outputs/apk/debug/app-debug.apk','app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk']:
     adb('install','-r',str(ROOT/apk),capture_output=True)
 results=json.loads((OUT/"validation.json").read_text()) if "--resume" in sys.argv and (OUT/"validation.json").exists() else []

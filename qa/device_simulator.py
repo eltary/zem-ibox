@@ -2,12 +2,12 @@
 import json, struct, socket, threading, time, pathlib, re
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-ROOT = pathlib.Path(__file__).resolve().parents[1] / 'research'
+ROOT = pathlib.Path(__file__).resolve().parent / 'generated/fixtures'
 VIDEO = (ROOT / 'test-clip.mp4').read_bytes()
 RAW = (ROOT / 'live.h264').read_bytes()
 PCM = (ROOT / 'audio.pcm').read_bytes()
 JPEG = (ROOT / 'frame.jpg').read_bytes()
-_motion=ROOT.parent/'qa/playback-0.0.13/generated/rtsp-motion.mjpg'
+_motion=ROOT/'rtsp-motion.mjpg'
 MOTION_JPEG=[m.group() for m in re.finditer(b'\xff\xd8.*?\xff\xd9',_motion.read_bytes(),re.DOTALL)] if _motion.exists() else [JPEG]
 AVI = (ROOT / 'playback-test.avi').read_bytes()
 AUD = [m.start() for m in re.finditer(b'\x00\x00(?:\x00)?\x01\x09', RAW)]
@@ -202,7 +202,7 @@ class HTTP(BaseHTTPRequestHandler):
             if mode=='multi':files=[{'f':'/storage/newest.MOV','t':'20261021123000','s':len(VIDEO),'d':4,'y':1},{'f':'/storage/middle.avi','t':'20261021122000','s':len(AVI),'d':4,'y':1},{'f':'/storage/oldest.MOV','t':'20261021121000','s':len(VIDEO),'d':4,'y':2},{'f':'/storage/photo.jpg','t':'20261021120000','s':len(JPEG),'y':3}]
             data=json.dumps({'file_list':files}).encode()
         elif self.path.startswith('/storage/fullhd'):
-            path=ROOT.parent/'qa'/'playback-0.0.11'/'generated'/'fullhd.MOV'
+            path=ROOT/('fullhd-aac.mp4' if 'fullhd-aac' in self.path else 'fullhd.MOV')
             if not path.is_file():self.send_error(404);return
             total=path.stat().st_size;start=0;end=total-1;rng=self.headers.get('Range');partial=rng is not None
             if partial:

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-export ANDROID_HOME=/home/user/.cache/android-sdk
+export ANDROID_HOME="${ANDROID_HOME:-$HOME/.cache/android-sdk}"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
-export ANDROID_AVD_HOME=/home/user/.cache/roadlink-audit013/avd
+export ANDROID_AVD_HOME="${ANDROID_AVD_HOME:-$HOME/.cache/roadlink-audit013/avd}"
 mkdir -p "$ANDROID_AVD_HOME"
 if [[ ! -f "$ANDROID_AVD_HOME/roadlink-audit013.ini" ]]; then
   "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --name roadlink-audit013 --package 'system-images;android-35;google_apis_playstore;x86_64' --device pixel_6 <<< 'no'

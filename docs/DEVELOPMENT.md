@@ -1,100 +1,77 @@
-# Разработка Zem iBox
+# Сборка и тестирование
 
-Основной обзор и инструкция пользователю: [README](../README.md).
-Рабочая папка — `/home/user/projects/zem-ibox` в WSL; прежняя папка Windows
-выведена из использования. Пакет/namespace: `io.zem.ibox`, имя: Zem iBox.
+Работайте из корня checkout в WSL/Linux. Пакет приложения: `io.zem.ibox`.
+Требуются Java 17, Android SDK 36 и Gradle Wrapper из проекта.
+`ANDROID_HOME` или игнорируемый `local.properties` задают путь к SDK.
 
-## Сборка
+## Подпись
 
-Требуются Java 17 и Android SDK. Путь SDK задаётся в игнорируемом
-`local.properties`; в рабочей среде это `~/.cache/android-sdk`.
-Используйте Gradle Wrapper проекта.
+Применяется существующая внешняя конфигурация
+`~/zem-android-sign/zem-signing.gradle` и `signing.properties` в том же каталоге.
+Создайте собственную конфигурацию для своей копии проекта; не публикуйте пароли
+или ключи. Для обновления уже установленной сборки требуется исходный ключ.
+Проверяемый публичный сертификат указан в [signing-certificate.json](signing-certificate.json).
+Релиз остаётся `debuggable=false`.
+
+## Пять вариантов APK
 
 ```bash
-./gradlew :app:assembleRelease :app:lintDebug
-python3 scripts/audit-release.py
+python3 scripts/build-release.py
+./gradlew :app:lintDebug
 ```
 
-Готовый проверенный APK: `release/Zem-iBox-<versionName>.apk`.
-По умолчанию включены ARM64 и ARMv7. Выпуск остаётся `debuggable=false`.
-Аудит сверяет версию, имя, пакет, pin сертификата, разрешения, собственные
-модули, происхождение native-библиотек libVLC и выравнивание APK.
+Скрипт собирает ARM64, ARMv7, x86, x86_64 и universal; каждый APK проверяется
+на пакет, версию, подпись, разрешения, ABI, ZIP alignment и побайтное совпадение
+библиотек/ресурсов с libVLC 3.7.7. Результаты: игнорируемый `release/`, включая
+`SHA256SUMS.txt` и `release-manifest.json`. Подробные отчёты: `qa/reports/release/`.
 
-## Подпись и версии
-
-Используется существующий общий ключ владельца из
-`~/zem-android-sign/signing.properties`; debug и release подписываются им.
-Публичный pin: [signing-certificate.json](signing-certificate.json).
-Не заменяйте ключ и не добавляйте приватную конфигурацию/пароли в Git.
-Рабочий сертификат выбран владельцем; release не становится от этого debug.
-Проверка подписи APK не является заключением Google Play Защиты.
-
-Источник версии — `app/build.gradle`. Один законченный набор изменений
-повышает версию на один шаг. Формат base-100: `0.0.99 → 0.1.0`,
-`0.99.99 → 1.0.0`. Android versionCode всегда растёт. Синхронизируйте
-README.md, README.txt, CHANGELOG и имя выпуска. Полные правила: [AGENTS.md](../AGENTS.md).
-
-## Локальные проверки
-
-Только `emulator-5586` принадлежит этому проекту. Физические телефоны
-и чужие эмуляторы не используются скриптами проекта.
+Для отдельной сборки:
 
 ```bash
-# Проверки транспортов, сборки кадров и очереди без Android.
+./gradlew :app:assembleRelease -Pzem.abis=arm64-v8a
+python3 scripts/audit-release.py --abis arm64-v8a --variant arm64-v8a
+```
+
+Версия задаётся только в `app/build.gradle`. Каждое завершённое изменение
+повышает versionName на один шаг и Android versionCode. Синхронизируйте README
+и CHANGELOG. libVLC закреплён на 3.7.7; [происхождение](libvlc-provenance.json).
+
+## Проверки
+
+```bash
 bash scripts/core-checks.sh
-
-# В отдельном терминале — локальный CTP/HTTP/TCP/UDP симулятор.
+# ffmpeg и Python Pillow нужны только для синтетических тестовых видео.
+python3 qa/prepare-fixtures.py
 python3 qa/device_simulator.py
-
-# Проверка приложения на уже запущенном emulator-5586.
-bash scripts/verify-emulator.sh
 ```
 
-Для отдельного Android-сценария:
+В другом терминале запустите собственный тестовый эмулятор и проверки:
 
 ```bash
-./gradlew -Pzem.abis=x86_64 :app:assembleDebug :app:assembleDebugAndroidTest
-adb -s emulator-5586 install -r app/build/outputs/apk/debug/app-debug.apk
-adb -s emulator-5586 install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-adb -s emulator-5586 shell am instrument -w -e media_only true io.zem.ibox.test/io.zem.ibox.SmokeTest
+./gradlew :app:assembleDebug :app:assembleDebugAndroidTest -Pzem.abis=x86_64
+bash scripts/verify-emulator.sh
+python3 qa/run-playback-audit.py
+python3 qa/run-live-audit.py
+python3 qa/run-format-audit.py
 ```
 
-Для проверки больших MOV сначала выполните `bash qa/make-playback-fixture.sh`,
-затем запустите инструментальный сценарий с `-e playback_only true`.
-Файл Full HD генерируется локально в ignored `qa/playback-0.0.11/generated/`;
-138-МБ ролик не входит в APK и Git. Сценарий проверяет реальные видимые пиксели,
-перемотку, скорость, оба режима декодера, восстановление и HTTP-диапазоны.
+Скрипты обращаются только к `emulator-5586`; физические устройства не затрагиваются.
+Сценарий `speed_only` проверяет локальное и Wi-Fi воспроизведение на 4×, затем
+возврат к 1×. Сценарий `readme_only` сохраняет реальные скриншоты приложения.
+Оба передаются через `adb shell am instrument -w -e <scenario> true`.
 
-Другие флаги сценариев: `availability_only`, `ux_only`, `ui_only`.
-Без флага запускаются общие интеграционные проверки. Тестовый адрес
-`10.0.2.2` разрешён только debug-сборкой. Снимки и отчёты 0.0.10 —
-[qa/media-0.0.10](../qa/media-0.0.10/).
+Тестовый адрес `10.0.2.2` разрешён только в debug. Синтетические медиа создаются
+в `qa/generated/fixtures/`, результаты — в `qa/reports/`. Эти каталоги,
+`release/`, `build/`, кэши, логи и временные `runs/` исключены из Git.
 
-## Архитектура
+## Важные ограничения
 
-| Часть | Назначение |
-| --- | --- |
-| MainActivity / Ui | Основные экраны, состояние подключения и единый визуальный стиль |
-| JieliSession / CtpClient | Сеанс устройства, CTP и привязанный к Wi-Fi HTTP |
-| TcpMediaReader / FrameAssembler / LiveStream | Приём, сборка и декодирование лайва |
-| LiveFrameQueue / PhoneRecording | Ограниченная очередь предпросмотра и запись на телефон |
-| TransferService / Library | Очередь скачивания, продолжение и MediaStore |
-| MediaThumbnails | Последовательная загрузка миниатюр и ограниченный кэш |
-| PlaybackQueue / PlayerActivity / WifiMediaProxy | Снимок списка видео, VLC и приватный Wi-Fi relay |
-| Diag | Журнал, очистка, отключение и скрытие паролей |
+Сетевые сокеты привязываются к захваченному Wi-Fi отдельно; весь процесс
+никогда не привязывается к сети регистратора. Отложенные действия проверяют
+исходный CTP-сеанс. Задняя камера включается пользователем в профиле устройства.
+Общие команды удаления и сброса заблокированы; форматирование проходит только
+по отдельному подтверждаемому пути с проверкой ответа `FORMAT.frm=1`.
 
-Native-воспроизведение не должно привязывать к Wi-Fi весь процесс.
-Сетевые действия и результаты привязаны к исходному сеансу;
-отключившееся устройство не может передать отложенную команду новому сеансу.
-
-Задняя камера включается пользователем в профиле конкретного устройства.
-Команды удаления, форматирования и сброса заблокированы
-`BuildConfig.ALLOW_DESTRUCTIVE_ACTIONS=false`.
-
-## История и зависимости
-
-`baselines/` и `history/` хранят предыдущие исходники и эксперименты.
-Они не являются активным приложением и не перенумеровываются задним числом.
-libVLC закреплён на 3.7.7; происхождение и хэши —
-[libvlc-provenance.json](libvlc-provenance.json), лицензии — в assets/.
-Фирменная иконка — [design/icon/road-v3](../design/icon/road-v3/).
+В репозитории остаются актуальные исходники, тесты, скрипты, документация и
+скриншоты. Старые APK, baselines и выведенные из использования эксперименты
+не должны возвращаться в Git. Коммиты используют нейтральное имя проекта.

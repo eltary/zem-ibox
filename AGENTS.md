@@ -1,7 +1,7 @@
 # Zem iBox
 
-Work in /home/user/projects/zem-ibox under WSL. The former Windows
-project directory is retired; do not recreate or build there.
+Work from the root of this repository under WSL/Linux. Do not create a
+second project checkout in the former Windows workspace.
 
 Android applicationId/namespace: io.zem.ibox. Display name: Zem iBox.
 Use the existing shared owner-managed key ~/zem-android-sign/signing.properties
@@ -14,8 +14,12 @@ Never generate a replacement key or commit/print the keystore/passwords.
 
 Use ./gradlew for Linux builds. Android SDK is configured in ignored
 local.properties; default WSL SDK is ~/.cache/android-sdk.
-The working RoadLink 0.1.3 snapshot in baselines/ is immutable history.
-Legacy experiments in history/ are for reference, not the active app.
+Keep only active sources, tests and documentation in Git. Baselines, retired
+experiments, APKs and generated reports were removed at the user's request.
+Use ignored release/ for distributable builds, qa/generated/ for fixtures,
+qa/reports/ for test results, and runs/ for temporary private task files.
+Do not commit personal workstation paths, personal contact details or delivery
+receipts. Use neutral project authorship for commits.
 Keep destructive commands disabled unless the user explicitly changes that.
 On 04.11.2026 the user explicitly enabled DVR microSD formatting. Keep it behind
 its dedicated confirmation and captured-session path; generic FORMAT, file
@@ -55,7 +59,8 @@ Only emulator-5586 belongs to this project; never operate on other emulators.
   Never bind the entire process to Wi-Fi for native playback. Phone videos open in the internal player by default;
   the row menu retains the system chooser and external VLC.
 - libVLC is pinned to 3.7.7. Preserve LGPL notices/source links and review any
-  native dependency change. Default release ABIs are arm64-v8a + armeabi-v7a;
+  native dependency change. Published releases include separate arm64-v8a, armeabi-v7a, x86 and x86_64
+  APKs plus a universal APK;
   pass -Pzem.abis=x86_64 for this project's emulator QA builds.
 - No letters (especially Z) in the launcher icon. Keep adaptive and monochrome
   versions, and inspect the real Android icon at small size.

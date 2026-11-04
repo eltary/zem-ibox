@@ -28,7 +28,7 @@ public final class PlayerActivity extends Activity {
     private Uri uri;private String mime;private TextView title,status,time;
     private Button play,previousVideo,nextVideo,queueButton,speedButton;
     private static final float[] SPEEDS={.25f,.5f,.75f,1f,1.25f,1.5f,2f,3f,4f};
-    private float playbackRate=1f;
+    private float playbackRate=1f;private int networkCacheMs=1200;
     private boolean softwareDecoder,automaticFallback,haveVideoFrame,frameFailureShown,pauseAfterOpen;
     private long startupWaitMs;private boolean launchVlc,waitingStartup;
     private long textureTimestamp,lastFrameAt,frameWaitMs,lastTickAt,lastStatsAt,playbackStartedAt;
@@ -80,7 +80,7 @@ public final class PlayerActivity extends Activity {
         LinearLayout more=row();Button rotate=Ui.iconButton(this,"rotate","Повернуть экран");rotate.setOnClickListener(v->setRequestedOrientation(getResources().getConfiguration().orientation==2?ActivityInfo.SCREEN_ORIENTATION_PORTRAIT:ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE));more.addView(rotate,new LinearLayout.LayoutParams(dp(48),dp(48)));
         speedButton=button("");updateSpeedLabel();sourceActions.add(speedButton);speedButton.setOnClickListener(v->showSpeed());more.addView(speedButton,new LinearLayout.LayoutParams(0,-2,1));
         Button external=Ui.iconButton(this,"settings","Параметры просмотра и совместимый режим");sourceActions.add(external);external.setOnClickListener(this::showPlaybackOptions);more.addView(external,new LinearLayout.LayoutParams(dp(48),dp(48)));LinearLayout.LayoutParams moreParams=new LinearLayout.LayoutParams(-1,-2);moreParams.topMargin=dp(8);controls.addView(more,moreParams);
-        try{engine=new LibVLC(this,new ArrayList<>(Arrays.asList("--no-video-title-show")));player=new MediaPlayer(engine);player.setUseOrientationFromBounds(true);player.attachViews(video,null,false,true);player.setVideoScale(MediaPlayer.ScaleType.SURFACE_BEST_FIT);loadVideo();handler.post(tick);}catch(Exception|LinkageError e){Diag.error("Player initialization",e);error("Проигрыватель не запустился: "+e.getMessage());}
+        try{engine=new LibVLC(this,new ArrayList<>(Arrays.asList("--no-video-title-show","--audio-time-stretch","--drop-late-frames","--skip-frames")));player=new MediaPlayer(engine);player.setUseOrientationFromBounds(true);player.attachViews(video,null,false,true);player.setVideoScale(MediaPlayer.ScaleType.SURFACE_BEST_FIT);loadVideo();handler.post(tick);}catch(Exception|LinkageError e){Diag.error("Player initialization",e);error("Проигрыватель не запустился: "+e.getMessage());}
     }
     private void arrangePlayer(){if(playerArea==null)return;boolean landscape=getResources().getConfiguration().orientation==2;playerArea.setOrientation(landscape?LinearLayout.HORIZONTAL:LinearLayout.VERTICAL);
         int width=playerArea.getWidth()>0?playerArea.getWidth():getResources().getDisplayMetrics().widthPixels-dp(32);
@@ -100,7 +100,7 @@ public final class PlayerActivity extends Activity {
             Media media;if(deviceSource)media=new Media(engine,input);else{mediaFile=getContentResolver().openAssetFileDescriptor(uri,"r");if(mediaFile==null)throw new IOException("Нет доступа к видео на телефоне");media=mediaFile.getStartOffset()==0?new Media(engine,mediaFile.getFileDescriptor()):new Media(engine,mediaFile);}media.setHWDecoderEnabled(!softwareDecoder,false);
             // Keep hardware decoding, but compose frames through TextureView rather than opaque direct rendering.
             if(!softwareDecoder)media.addOption(":no-mediacodec-dr");
-            media.addOption(":network-caching=1200");media.addOption(":http-reconnect");player.setMedia(media);media.release();
+            networkCacheMs=cacheForRate(playbackRate);media.addOption(":network-caching="+networkCacheMs);media.addOption(":http-reconnect");player.setMedia(media);media.release();
             player.setEventListener(event->{if(destroyed||!sourceAvailable||generation!=mediaGeneration)return;
                 if(event.type==MediaPlayer.Event.EncounteredError){Diag.log("PLAY","Native error file="+entry.name+" software="+softwareDecoder);if(!trySoftware("native error")){frameFailureShown=true;waitingStartup=false;getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);status.setText("Ошибка просмотра · повторите открытие через параметры");error("Не удалось воспроизвести запись. В параметрах просмотра можно повторить открытие или выбрать другой режим. Также можно скачать оригинал из архива.");}}
                 else if(event.type==MediaPlayer.Event.Buffering){buffering=event.getBuffering();if(!frameFailureShown)status.setText(buffering<100?"Загрузка видео · "+Math.round(buffering)+"%":haveVideoFrame?playingLabel():"Ожидаем изображение…");}
@@ -115,7 +115,20 @@ public final class PlayerActivity extends Activity {
         for(int i=0;i<SPEEDS.length;i++){labels[i]=speedLabel(SPEEDS[i])+(SPEEDS[i]==1f?" · обычная":"");if(SPEEDS[i]==playbackRate)selected=i;}
         sourceDialog=new AlertDialog.Builder(this).setTitle("Скорость видео").setSingleChoiceItems(labels,selected,(d,index)->{d.dismiss();if(generation!=mediaGeneration||!canReadSource())return;applySpeed(SPEEDS[index],true);}).setNegativeButton("Закрыть",null).show();
     }
-    private void applySpeed(float requested,boolean notify){resetFrameWait();player.setRate(requested);float actual=player.getRate();playbackRate=actual>0?actual:1f;updateSpeedLabel();if(notify&&Math.abs(playbackRate-requested)>.01f)Toast.makeText(this,"Для этой записи выбранная скорость недоступна",Toast.LENGTH_SHORT).show();}
+    private static int cacheForRate(float rate){return rate>2f?Math.round(1200*rate):1200;}
+    private void applySpeed(float requested,boolean notify){
+        resetFrameWait();long position=Math.max(0,player.getTime());boolean changed=Math.abs(playbackRate-requested)>.01f;
+        if(notify&&changed&&deviceSource&&cacheForRate(requested)!=networkCacheMs){
+            playbackRate=requested;restorePosition=position;pauseAfterOpen=!player.isPlaying()&&playbackStartedAt>0;updateSpeedLabel();loadVideo();return;
+        }
+        // Reapplying the same rate after each buffering event resets native audio
+        // timing unnecessarily. A real user change flushes both queues together.
+        if(Math.abs(player.getRate()-requested)>.01f)player.setRate(requested);
+        float actual=player.getRate();playbackRate=actual>0?actual:1f;updateSpeedLabel();
+        if(notify&&changed&&position>0&&player.isSeekable())player.setTime(position);
+        if(notify&&Math.abs(playbackRate-requested)>.01f)Toast.makeText(this,"Для этой записи выбранная скорость недоступна",Toast.LENGTH_SHORT).show();
+        Diag.log("PLAY SPEED","rate="+playbackRate+" cacheMs="+networkCacheMs+" source="+(deviceSource?"Wi-Fi":"phone")+" resync="+(notify&&changed));
+    }
     private static String speedLabel(float rate){return java.math.BigDecimal.valueOf(rate).stripTrailingZeros().toPlainString().replace('.',',')+"×";}
     private void updateSpeedLabel(){if(speedButton!=null){speedButton.setText("Скорость\n"+speedLabel(playbackRate));speedButton.setContentDescription("Скорость видео: "+speedLabel(playbackRate));}}
     private String playingLabel(){return "Внутренний плеер · "+(deviceSource?"По Wi-Fi · без скачивания":"Запись на телефоне")+(softwareDecoder?" · совместимый режим":"");}
@@ -134,7 +147,7 @@ public final class PlayerActivity extends Activity {
             if(trySoftware("video frames stalled"))return;
             frameFailureShown=true;status.setText("Изображение не поступает · откройте параметры просмотра");Diag.log("PLAY","Frame output stalled in compatible mode");
         }
-        if(visible&&now-lastStatsAt>5000){lastStatsAt=now;IMedia media=player.getMedia();try{IMedia.Stats stats=media==null?null:media.getStats();Diag.log("PLAY STATS","position="+player.getTime()+" length="+player.getLength()+" buffering="+Math.round(buffering)+" software="+softwareDecoder+" frame="+textureTimestamp+(stats==null?"":" decoded="+stats.decodedVideo+" displayed="+stats.displayedPictures+" lost="+stats.lostPictures)+(proxy==null?"":" "+proxy.stats()));}finally{if(media!=null)media.release();}}
+        if(visible&&now-lastStatsAt>5000){lastStatsAt=now;IMedia media=player.getMedia();try{IMedia.Stats stats=media==null?null:media.getStats();Diag.log("PLAY STATS","position="+player.getTime()+" length="+player.getLength()+" buffering="+Math.round(buffering)+" software="+softwareDecoder+" speed="+playbackRate+" frame="+textureTimestamp+(stats==null?"":" decoded="+stats.decodedVideo+" displayed="+stats.displayedPictures+" lost="+stats.lostPictures+" audioDecoded="+stats.decodedAudio+" audioPlayed="+stats.playedAbuffers+" audioLost="+stats.lostAbuffers+" corrupted="+stats.demuxCorrupted)+(proxy==null?"":" "+proxy.stats()));}finally{if(media!=null)media.release();}}
     }
     private boolean trySoftware(String reason){if(softwareDecoder||automaticFallback||!visible||!canReadSource())return false;automaticFallback=true;Diag.log("PLAY","Retry in compatible mode: "+reason);restartDecoder(true);pauseAfterOpen=false;Toast.makeText(this,"Пробуем совместимый режим просмотра",Toast.LENGTH_SHORT).show();return true;}
     private void restartDecoder(boolean software){if(player==null||!canReadSource())return;restorePosition=Math.max(0,player.getTime());pauseAfterOpen=!player.isPlaying()&&playbackStartedAt>0;softwareDecoder=software;loadVideo();}

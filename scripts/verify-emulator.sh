@@ -10,12 +10,13 @@ for attempt in {1..30}; do
     sleep 2
 done
 [[ "$ready" == true ]]
-# Build x86_64 test artifacts separately; the phone release stays ARM-only.
+# Build x86_64 test artifacts separately; the release APKs are audited separately.
+mkdir -p qa/reports
 ./gradlew -Pzem.abis=x86_64 :app:assembleDebug :app:assembleDebugAndroidTest
 $adb -s "$serial" shell am force-stop "$package"
 $adb -s "$serial" install -r app/build/outputs/apk/debug/app-debug.apk
 $adb -s "$serial" install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-$adb -s "$serial" shell am instrument -w "$package.test/io.zem.ibox.SmokeTest" | tee qa/ui-instrumentation.log
-grep -q 'PASS: .* Android integration assertions' qa/ui-instrumentation.log
+$adb -s "$serial" shell am instrument -w "$package.test/io.zem.ibox.SmokeTest" | tee qa/reports/integration.log
+grep -q 'PASS: .* Android integration assertions' qa/reports/integration.log
 $adb -s "$serial" shell am force-stop "$package"
 echo 'PASS: x86_64 Android integration checks; phone release is audited separately'

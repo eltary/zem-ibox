@@ -20,7 +20,7 @@ def jpeg_data(jpeg):
 
 def start(port,frames,jpeg,pcm,state):
     sps=next(n for n in nals(frames[0]) if n[0]&31==7);pps=next(n for n in nals(frames[0]) if n[0]&31==8)
-    raw=(pathlib.Path(__file__).parent/"playback-0.0.13/generated/rtsp-motion.mjpg").read_bytes()
+    raw=(pathlib.Path(__file__).parent/"generated/fixtures/rtsp-motion.mjpg").read_bytes()
     jpgs=[jpeg_data(m.group()) for m in re.finditer(b"\xff\xd8.*?\xff\xd9",raw,re.DOTALL)]
     def client(conn):
         send_lock=threading.Lock();playing=threading.Event();done=threading.Event();channels={};uri='';seq={0:0,2:0}

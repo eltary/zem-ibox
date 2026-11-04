@@ -1,45 +1,40 @@
-.gradle/
-**/build/
+# Local configuration and signing secrets
 local.properties
-tools/
-research/decompiled/
-research/*.apk
-research/*.html
-research/*.txt
-research/*.log
-*.jks
 .signing/
-qa/classes/
-qa/*.pid
-qa/apk-audit-*/
-diagnostics/generated/
-diagnostics/matrix/generated/
-qa/diagnostic-apks/
-qa/manifest-only-build/
-qa/matrix-empty-build/
-
+*.jks
 *.keystore
 *.p12
 *.pfx
 *.key
 signing.properties
-**/generated/
-qa/*.aar
-qa/libvlc-classes.jar
-qa/libvlc-source*
-qa/ui-emulator*.log
-qa/ui-simulator*.log
 
-qa/ui-build.log
-qa/ui-instrumentation.log
+# IDEs and operating systems
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
 
-qa/ui-small-test.log
-
-qa/ui-normal-test.log
-qa/ui-release-build.log
-
-qa/ux-attempts/
-qa/ux-build.log
-qa/ux-integration-run.log
-qa/ux-readme-diff.txt
+# Build, dependency and tool caches
+.gradle/
+**/build/
+tools/
 __pycache__/
+*.py[cod]
+qa/classes/
+qa/generated/
+
+# Release packages and generated verification results
+release/
+dist/
+runs/
+qa/reports/
+*.apk
+*.aab
+*.apks
+*.aar
+*.log
+*.pid
+*.hprof
+*.tmp
+*.temp

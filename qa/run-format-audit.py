@@ -1,6 +1,6 @@
 from pathlib import Path
 import subprocess,json,sys
-root=Path(__file__).resolve().parents[1];out=root/'qa/format-0.0.14';adb=Path.home()/'.cache/android-sdk/platform-tools/adb'
+root=Path(__file__).resolve().parents[1];out=root/'qa/reports/format';adb=Path.home()/'.cache/android-sdk/platform-tools/adb';out.mkdir(parents=True,exist_ok=True)
 def run(*args):return subprocess.run([str(adb),'-s','emulator-5586',*args],capture_output=True,text=True,errors='replace',timeout=180)
 for apk in ['app/build/outputs/apk/debug/app-debug.apk','app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk']:run('install','-r',str(root/apk)).check_returncode()
 ui_only="--ui-only" in sys.argv;results=json.loads((out/"validation.json").read_text()) if ui_only else []
