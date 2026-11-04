@@ -19,7 +19,9 @@ experiments, APKs and generated reports were removed at the user's request.
 Use ignored release/ for distributable builds, qa/generated/ for fixtures,
 qa/reports/ for test results, and runs/ for temporary private task files.
 Do not commit personal workstation paths, personal contact details or delivery
-receipts. Use neutral project authorship for commits.
+receipts. Attribute commits to the owner’s public GitHub profile using the
+GitHub-provided noreply address; never publish a private email. Write commit
+messages in Russian.
 Keep destructive commands disabled unless the user explicitly changes that.
 On 04.11.2026 the user explicitly enabled DVR microSD formatting. Keep it behind
 its dedicated confirmation and captured-session path; generic FORMAT, file
@@ -130,4 +132,6 @@ Only emulator-5586 belongs to this project; never operate on other emulators.
   and reproducible QA belong in docs/DEVELOPMENT.md and source scripts.
 - Diagnostic file/logcat recording defaults to off; preserve an explicitly saved choice.
 - Android minimum is API 24 (7.0). Guard newer platform APIs and test on API 24.
-- The owner declined repository recreation and will decide public visibility themselves.
+- The owner recreated the repository as public on 04.11.2026. Keep only main
+  and the latest published release. Public GitHub profile attribution is allowed;
+  personal contacts, workstation paths and private email addresses stay excluded.
