@@ -13,6 +13,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.lang.reflect.*;
 import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 final class UpdateChecks {
     private final Instrumentation test;private MainActivity activity;private int checks;
@@ -45,14 +47,28 @@ final class UpdateChecks {
                 // Intercept the installer; a test must not replace the running app.
                 IntentFilter filter=new IntentFilter(Intent.ACTION_VIEW);filter.addDataType("application/vnd.android.package-archive");Instrumentation.ActivityMonitor monitor=test.addMonitor(filter,new Instrumentation.ActivityResult(Activity.RESULT_CANCELED,null),true);
                 try{
-                    for(String mode:new String[]{"good","badHash","short","http403","badjson","slow"}){
-                        fixture.mode=mode;AppUpdates updates=new AppUpdates(activity,()->{},fixture.origin+"/latest","0.0.17",BuildConfig.VERSION_CODE-1);
+                    Map<String,Long> timings=new HashMap<>();
+                    for(String mode:new String[]{"good","noRanges","paced","pacedNoRanges","badHash","short","wrongRange","http403","badjson","slow","stalled"}){
+                        fixture.mode=mode;fixture.maxActive.set(0);fixture.requests.set(0);AppUpdates updates=new AppUpdates(activity,()->{},fixture.origin+"/latest","0.0.17",BuildConfig.VERSION_CODE-1);
                         try{
                             main(updates::check);waitFor(()->!((Boolean)field(updates,"busy")),8000);
                             if(mode.equals("http403")||mode.equals("badjson")){check(updates.summary().contains("Не удалось"),"Metadata error is recoverable: "+mode);continue;}
-                            main(updates::download);
-                            if(mode.equals("slow")){waitFor(()->((Long)field(updates,"downloaded"))>0,8000);main(updates::cancel);waitFor(()->!new File(UpdateProvider.apk(activity).getParentFile(),"package.part").exists(),5000);check(!UpdateProvider.apk(activity).exists(),"Cancelled APK is never exposed to installer");}
-                            else{waitFor(()->!((Boolean)field(updates,"busy")),25000);boolean ready=(Boolean)field(updates,"ready");check(ready==mode.equals("good"),"Only a complete verified APK becomes installable: "+mode);
+                            long started=SystemClock.elapsedRealtime();main(updates::download);
+                            if(mode.equals("slow")||mode.equals("stalled")){
+                                main(updates::show);
+                                if(mode.equals("slow"))waitFor(()->((Long)field(updates,"downloaded"))>0,8000);else waitFor(()->fixture.active.get()>0,8000);
+                                AlertDialog download=(AlertDialog)field(updates,"dialog");Button cancel=download.getButton(AlertDialog.BUTTON_NEGATIVE);
+                                check(cancel.isEnabled()&&cancel.getText().toString().equals("Отменить"),"A downloading update exposes Cancel: "+mode);
+                                long clicked=SystemClock.elapsedRealtime();main(cancel::performClick);
+                                check(SystemClock.elapsedRealtime()-clicked<700&&!((Boolean)field(updates,"busy"))&&download.isShowing(),"Cancellation is immediate and confirms the result: "+mode);
+                                waitFor(()->fixture.active.get()==0&&!hasPartial(),2500);
+                                check(!UpdateProvider.apk(activity).exists(),"Cancellation closes even a stalled socket and removes partial APK: "+mode);
+                                if(mode.equals("slow")){fixture.mode="good";main(updates::download);waitFor(()->!((Boolean)field(updates,"busy")),25000);check((Boolean)field(updates,"ready"),"A new download succeeds immediately after cancellation without stale callbacks");}
+                            }
+                            else{waitFor(()->!((Boolean)field(updates,"busy")),25000);long elapsed=SystemClock.elapsedRealtime()-started;timings.put(mode,elapsed);boolean ready=(Boolean)field(updates,"ready");check(ready==Arrays.asList("good","noRanges","paced","pacedNoRanges").contains(mode),"Only a complete verified APK becomes installable: "+mode);
+                                if(mode.equals("good"))check(fixture.maxActive.get()>=3,"APK ranges really download concurrently");
+                                if(mode.equals("noRanges"))check(fixture.requests.get()==1,"A server ignoring Range receives only one full download");
+                                if(mode.equals("pacedNoRanges"))check(timings.get("paced")<elapsed*.75+500,"Parallel ranges improve transfer time on a paced connection: "+timings.get("paced")+" vs "+elapsed+" ms");
                                 if(ready){try(ParcelFileDescriptor fd=activity.getContentResolver().openFileDescriptor(UpdateProvider.uri(activity),"r")){check(fd!=null&&fd.getStatSize()==fixture.apk.length(),"Verified package can be read by the installer URI");}reject(()->activity.getContentResolver().openFileDescriptor(UpdateProvider.uri(activity),"rw"),"APK provider is read-only");
                                     Field saving=MainActivity.class.getDeclaredField("phoneSaving");saving.setAccessible(true);saving.setBoolean(activity,true);try{main(updates::install);check(updates.summary().startsWith("Дождитесь"),"Installation waits for phone recording finalization");}finally{saving.setBoolean(activity,false);}
                                     Field visible=MainActivity.class.getDeclaredField("visible");visible.setAccessible(true);visible.setBoolean(activity,false);try{main(updates::install);check(updates.summary().contains("Откройте приложение"),"A finished background download never launches the installer");}finally{visible.setBoolean(activity,true);}
@@ -68,19 +84,36 @@ final class UpdateChecks {
             try{main(ui::show);waitFor(()->!((Boolean)field(ui,"busy")),8000);AlertDialog dialog=(AlertDialog)field(ui,"dialog");check(dialog.isShowing()&&dialog.getButton(AlertDialog.BUTTON_POSITIVE).getText().toString().equals("Скачать и установить"),"Update UI offers an explicit download action");
                 test.waitForIdleSync();Thread.sleep(300);for(int which:new int[]{AlertDialog.BUTTON_POSITIVE,AlertDialog.BUTTON_NEGATIVE,AlertDialog.BUTTON_NEUTRAL}){Button button=dialog.getButton(which);android.graphics.Rect rect=new android.graphics.Rect();check(button.getGlobalVisibleRect(rect)&&rect.height()>=button.getHeight()-2&&rect.width()>=button.getWidth()-2,"Update dialog action is fully visible: "+which);}
                 File folder=new File(activity.getExternalFilesDir(null),"ui-audit");folder.mkdirs();android.graphics.Bitmap image=test.getUiAutomation().takeScreenshot();try(OutputStream out=new FileOutputStream(new File(folder,"app-update.png"))){image.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out);}image.recycle();
+                fixture.mode="slow";main(ui::download);waitFor(()->((Long)field(ui,"downloaded"))>0,8000);test.waitForIdleSync();Thread.sleep(400);test.waitForIdleSync();
+                Button cancel=dialog.getButton(AlertDialog.BUTTON_NEGATIVE);android.graphics.Rect rect=new android.graphics.Rect();check(cancel.getText().toString().equals("Отменить")&&cancel.isEnabled()&&cancel.getGlobalVisibleRect(rect)&&rect.height()>=cancel.getHeight()-2,"Cancel stays visible and enabled while downloading");
+                TextView text=(TextView)field(ui,"message");check(text.getText().toString().contains("/с")&&text.getText().toString().contains("%"),"Download shows bytes, percentage and transfer speed");
+                image=test.getUiAutomation().takeScreenshot();try(OutputStream out=new FileOutputStream(new File(folder,"app-update-download.png"))){image.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out);}image.recycle();
             }finally{main(ui::close);}
         }finally{main(activity::finish);}
         return "PASS: "+checks+" update assertions on API "+Build.VERSION.SDK_INT+"\n";
     }
+    private boolean hasPartial(){File parent=UpdateProvider.apk(activity).getParentFile();File[] folders=parent.listFiles();if(folders!=null)for(File folder:folders)if(new File(folder,"package.part").exists())return true;return false;}
     private static final class Fixture implements AutoCloseable{
         final File apk;final ServerSocket server;final String origin,sha;volatile String mode="good";volatile boolean closed;
-        Fixture(File file)throws Exception{apk=file;MessageDigest hash=MessageDigest.getInstance("SHA-256");try(InputStream in=new FileInputStream(file)){byte[] b=new byte[128*1024];int n;while((n=in.read(b))!=-1)hash.update(b,0,n);}sha=Io.hex(hash.digest());server=new ServerSocket(0,8,InetAddress.getByName("127.0.0.1"));origin="http://127.0.0.1:"+server.getLocalPort();Thread thread=new Thread(()->{while(!closed)try{Socket socket=server.accept();Thread request=new Thread(()->serve(socket));request.setDaemon(true);request.start();}catch(IOException e){if(!closed)throw new RuntimeException(e);}});thread.setDaemon(true);thread.start();}
+        final AtomicInteger active=new AtomicInteger(),maxActive=new AtomicInteger(),requests=new AtomicInteger();
+        final Set<Socket> sockets=ConcurrentHashMap.newKeySet();
+        Fixture(File file)throws Exception{apk=file;MessageDigest hash=MessageDigest.getInstance("SHA-256");try(InputStream in=new FileInputStream(file)){byte[] b=new byte[128*1024];int n;while((n=in.read(b))!=-1)hash.update(b,0,n);}sha=Io.hex(hash.digest());server=new ServerSocket(0,8,InetAddress.getByName("127.0.0.1"));origin="http://127.0.0.1:"+server.getLocalPort();Thread thread=new Thread(()->{while(!closed)try{Socket socket=server.accept();sockets.add(socket);Thread request=new Thread(()->serve(socket));request.setDaemon(true);request.start();}catch(IOException e){if(!closed)throw new RuntimeException(e);}});thread.setDaemon(true);thread.start();}
         JSONObject metadata()throws Exception{return metadata("x86_64");}
         JSONObject metadata(String abi)throws Exception{String name="Zem-iBox-"+BuildConfig.VERSION_NAME+"-"+abi+".apk";return new JSONObject().put("tag_name","v"+BuildConfig.VERSION_NAME).put("draft",false).put("prerelease",false).put("assets",new JSONArray().put(new JSONObject().put("name",name).put("browser_download_url",origin+"/"+name).put("size",apk.length()).put("digest","sha256:"+(mode.equals("badHash")?"0".repeat(64):sha))));}
-        private void serve(Socket socket){try(socket){socket.setSoTimeout(5000);BufferedReader reader=new BufferedReader(new InputStreamReader(socket.getInputStream(),StandardCharsets.US_ASCII));String request=reader.readLine();if(request==null)return;String path=request.split(" ")[1],line;while((line=reader.readLine())!=null&&!line.isEmpty()){}OutputStream out=socket.getOutputStream();
-            if(path.equals("/latest")){byte[] data=(mode.equals("badjson")?"invalid json":metadata().toString()).getBytes(StandardCharsets.UTF_8);String code=mode.equals("http403")?"403 Forbidden":"200 OK";out.write(("HTTP/1.1 "+code+"\r\nContent-Length: "+data.length+"\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));out.write(data);}
-            else{out.write(("HTTP/1.1 200 OK\r\nContent-Length: "+apk.length()+"\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));try(InputStream in=new FileInputStream(apk)){byte[] bytes=new byte[32768];int n;while((n=in.read(bytes))!=-1){out.write(bytes,0,n);out.flush();if(mode.equals("short"))break;if(mode.equals("slow"))Thread.sleep(12);}}}
-        }catch(Exception ignored){}}
-        public void close()throws IOException{closed=true;server.close();}
+        private void serve(Socket socket){boolean transfer=false;String current=mode;try(socket){
+            socket.setSoTimeout(10000);BufferedReader reader=new BufferedReader(new InputStreamReader(socket.getInputStream(),StandardCharsets.US_ASCII));String request=reader.readLine();if(request==null)return;
+            String path=request.split(" ")[1],line,range="";while((line=reader.readLine())!=null&&!line.isEmpty())if(line.toLowerCase(Locale.ROOT).startsWith("range:"))range=line.substring(6).trim();
+            OutputStream out=socket.getOutputStream();
+            if(path.equals("/latest")){byte[] data=(current.equals("badjson")?"invalid json":metadata().toString()).getBytes(StandardCharsets.UTF_8);String code=current.equals("http403")?"403 Forbidden":"200 OK";out.write(("HTTP/1.1 "+code+"\r\nContent-Length: "+data.length+"\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));out.write(data);return;}
+            transfer=true;requests.incrementAndGet();maxActive.accumulateAndGet(active.incrementAndGet(),Math::max);
+            long from=0,to=apk.length()-1;boolean ranged=!range.isEmpty()&&!current.equals("noRanges")&&!current.equals("pacedNoRanges");
+            if(ranged){String[] positions=range.substring("bytes=".length()).split("-");from=Long.parseLong(positions[0]);to=Long.parseLong(positions[1]);}
+            String headers="HTTP/1.1 "+(ranged?"206 Partial Content":"200 OK")+"\r\nContent-Length: "+(to-from+1)+"\r\nConnection: close\r\n";
+            if(ranged)headers+="Content-Range: bytes "+(current.equals("wrongRange")?from+1:from)+"-"+to+"/"+apk.length()+"\r\n";
+            out.write((headers+"\r\n").getBytes(StandardCharsets.US_ASCII));out.flush();
+            if(current.equals("stalled")){while(socket.getInputStream().read()!=-1){}return;}
+            try(RandomAccessFile in=new RandomAccessFile(apk,"r")){in.seek(from);byte[] bytes=new byte[32768];long left=to-from+1;while(left>0){int n=in.read(bytes,0,(int)Math.min(left,bytes.length));if(n==-1)break;out.write(bytes,0,n);out.flush();left-=n;if(current.equals("short"))break;if(current.equals("slow"))Thread.sleep(55);else if(current.startsWith("paced"))Thread.sleep(12);}}
+        }catch(Exception ignored){}finally{if(transfer)active.decrementAndGet();sockets.remove(socket);}}
+        public void close()throws IOException{closed=true;server.close();for(Socket socket:sockets)try{socket.close();}catch(IOException ignored){}}
     }
 }

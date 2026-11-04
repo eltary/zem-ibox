@@ -22,10 +22,10 @@ final class AppUpdates implements AutoCloseable {
     private final Handler main=new Handler(Looper.getMainLooper());
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private final SharedPreferences prefs;private final String endpoint,testOrigin,installedVersion;private final long installedCode;
-    private volatile Task task;private boolean closed,busy,ready;private long attemptedAt;
+    private volatile Task task;private boolean closed,busy,ready,downloading;private long attemptedAt,downloadStarted;
     private UpdateRelease release;private String status="";private long downloaded;
     private AlertDialog dialog,permissionDialog;private TextView message;private ProgressBar progress;
-    private static final class Task {volatile boolean cancelled;volatile HttpURLConnection connection;}
+    private static final class Task {volatile boolean cancelled,halted;volatile Thread runner;final Set<HttpURLConnection> connections=ConcurrentHashMap.newKeySet();long lastProgress,received;}
     AppUpdates(Activity a,Runnable onChange){this(a,onChange,UpdateRelease.API,BuildConfig.VERSION_NAME,BuildConfig.VERSION_CODE);}
     AppUpdates(Activity a,Runnable onChange,String endpoint,String installed,long code){
         activity=a;changed=onChange;this.endpoint=endpoint;installedVersion=installed;installedCode=code;prefs=a.getSharedPreferences("updates",0);
@@ -40,39 +40,54 @@ final class AppUpdates implements AutoCloseable {
         if(dialog!=null&&dialog.isShowing()){dialog.dismiss();return;}
         LinearLayout content=new LinearLayout(activity);content.setOrientation(LinearLayout.VERTICAL);int pad=Ui.dp(activity,20);content.setPadding(pad,pad/2,pad,pad/2);
         message=new TextView(activity);message.setTextColor(Ui.INK);message.setTextSize(15);content.addView(message);progress=new ProgressBar(activity,null,android.R.attr.progressBarStyleHorizontal);content.addView(progress,new LinearLayout.LayoutParams(-1,Ui.dp(activity,12)));
-        ScrollView scroll=new ScrollView(activity){protected void onMeasure(int width,int height){float scale=getResources().getConfiguration().fontScale;int cap=(int)(getResources().getDisplayMetrics().heightPixels*(scale>1.5f?.28f:.45f));super.onMeasure(width,android.view.View.MeasureSpec.makeMeasureSpec(Math.min(android.view.View.MeasureSpec.getSize(height),cap),android.view.View.MeasureSpec.AT_MOST));}};scroll.addView(content);dialog=new AlertDialog.Builder(activity).setTitle("Обновление приложения").setView(scroll).setPositiveButton("Проверить",null).setNegativeButton("Закрыть",(d,w)->cancel()).setNeutralButton("На GitHub",(d,w)->openRelease()).create();
-        dialog.setOnCancelListener(d->cancel());dialog.show();dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{if(ready)install();else if(available())download();else check();});render();if(!busy&&!ready)check();
+        ScrollView scroll=new ScrollView(activity){protected void onMeasure(int width,int height){float scale=getResources().getConfiguration().fontScale;int cap=(int)(getResources().getDisplayMetrics().heightPixels*(scale>1.5f?(busy?.50f:.28f):.45f));super.onMeasure(width,android.view.View.MeasureSpec.makeMeasureSpec(Math.min(android.view.View.MeasureSpec.getSize(height),cap),android.view.View.MeasureSpec.AT_MOST));}};scroll.addView(content);dialog=new AlertDialog.Builder(activity).setTitle("Обновление приложения").setView(scroll).setPositiveButton("Проверить",null).setNegativeButton("Закрыть",null).setNeutralButton("На GitHub",(d,w)->openRelease()).create();
+        dialog.setOnCancelListener(d->cancel());dialog.show();dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v->{if(busy)cancel();else dialog.dismiss();});dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{if(ready)install();else if(available())download();else check();});render();if(!busy&&!ready)check();
     }
     private boolean available(){try{return release!=null&&release.newerThan(installedVersion);}catch(IOException e){return false;}}
     private void render(){
         changed.run();if(dialog==null||!dialog.isShowing())return;
-        String text="Установлена версия "+installedVersion+"\n\n"+summary();if(available())text+="\nРазмер: "+TransferService.bytes(release.size)+"\n\nСкачивание начнётся после нажатия. Установку подтвердит Android.";
-        message.setText(text);progress.setVisibility(busy?android.view.View.VISIBLE:android.view.View.GONE);progress.setIndeterminate(busy&&downloaded==0);if(release!=null&&downloaded>0)progress.setProgress((int)Math.min(100,downloaded*100/release.size));
-        Button action=dialog.getButton(AlertDialog.BUTTON_POSITIVE);action.setText(ready?"Установить":available()?"Скачать и установить":"Проверить ещё раз");action.setEnabled(!busy);
+        String text=busy?summary():"Установлена версия "+installedVersion+"\n\n"+summary();
+        if(downloading&&release!=null){
+            int percent=(int)Math.min(100,downloaded*100/release.size);
+            text+="\n"+(downloaded==0?"0 Б":TransferService.bytes(downloaded))+" из "+TransferService.bytes(release.size)+" · "+percent+"%";
+            long elapsed=SystemClock.elapsedRealtime()-downloadStarted;
+            if(downloaded>0&&elapsed>0){long speed=downloaded*1000/elapsed;text+="\n"+TransferService.bytes(speed)+"/с";if(speed>0&&downloaded<release.size){long seconds=(release.size-downloaded+speed-1)/speed;text+=" · ещё примерно "+(seconds<60?seconds+" с":(seconds+59)/60+" мин");}}
+            else text+="\nПодключаемся к серверу…";
+        }else if(available()&&!busy&&!ready)text+="\nРазмер: "+TransferService.bytes(release.size)+"\n\nСкачивание начнётся после нажатия. Установку подтвердит Android.";
+        message.setText(text);progress.setVisibility(busy?android.view.View.VISIBLE:android.view.View.GONE);progress.setIndeterminate(busy&&!downloading);if(release!=null)progress.setProgress((int)Math.min(100,downloaded*100/release.size));
+        Button action=dialog.getButton(AlertDialog.BUTTON_POSITIVE);action.setText(ready?"Установить":available()?"Скачать и установить":"Проверить ещё раз");action.setEnabled(!busy);action.setVisibility(busy?android.view.View.GONE:android.view.View.VISIBLE);
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setText(busy?"Отменить":"Закрыть");dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setVisibility(busy?android.view.View.GONE:android.view.View.VISIBLE);
     }
+
     void check(){
-        if(closed||busy)return;ready=false;busy=true;status="Проверяем последний релиз GitHub…";attemptedAt=SystemClock.elapsedRealtime();downloaded=0;Task job=new Task();task=job;render();
-        worker.execute(()->{try{
+        if(closed||busy)return;ready=false;busy=true;downloading=false;status="Проверяем последний релиз GitHub…";attemptedAt=SystemClock.elapsedRealtime();downloaded=0;Task job=new Task();task=job;render();
+        worker.execute(()->{job.runner=Thread.currentThread();try{
             String data=new String(read(job,endpoint,2*1024*1024),StandardCharsets.UTF_8);UpdateRelease latest=UpdateRelease.parse(new JSONObject(data),Build.SUPPORTED_ABIS,testOrigin);
             post(job,()->{release=latest;busy=false;status="";if(testOrigin.isEmpty())prefs.edit().putString("release",data).putLong("checkedAt",System.currentTimeMillis()).apply();render();});
-        }catch(Exception e){failed(job,"Не удалось проверить обновление. "+reason(e));}});
+        }catch(Exception e){failed(job,"Не удалось проверить обновление. "+reason(e));}finally{job.runner=null;}});
     }
     void download(){
-        if(closed||busy||!available())return;UpdateRelease selected=release;Task job=new Task();task=job;busy=true;ready=false;downloaded=0;status="Скачиваем обновление…";render();
-        worker.execute(()->{File target=UpdateProvider.apk(activity),partial=new File(target.getParentFile(),"package.part");boolean success=false;try{
+        if(closed||busy||!available())return;UpdateRelease selected=release;Task job=new Task();task=job;busy=true;ready=false;downloading=true;downloaded=0;downloadStarted=SystemClock.elapsedRealtime();status="Скачиваем обновление…";render();
+        worker.execute(()->{job.runner=Thread.currentThread();File target=UpdateProvider.apk(activity),folder=new File(target.getParentFile(),"transfer-"+UUID.randomUUID()),partial=new File(folder,"package.part");boolean success=false;try{
+            cancelled(job);
             if(!target.getParentFile().isDirectory()&&!target.getParentFile().mkdirs())throw new IOException("Не удалось создать папку обновления");
+            if(!folder.mkdir())throw new IOException("Не удалось создать временную папку обновления");
+            target.delete();
             if(target.getParentFile().getUsableSpace()<selected.size+10L*1024*1024)throw new IOException("Недостаточно свободного места на телефоне");
-            MessageDigest digest=MessageDigest.getInstance("SHA-256");HttpURLConnection conn=open(job,selected.url);long count=0,lastProgress=0;
-            try(InputStream in=conn.getInputStream();FileOutputStream out=new FileOutputStream(partial)){
-                long length=conn.getContentLengthLong();if(length>=0&&length!=selected.size)throw new IOException("Размер APK отличается от указанного в релизе");
-                byte[] block=new byte[128*1024];int n;while((n=in.read(block))!=-1){cancelled(job);count+=n;if(count>selected.size)throw new IOException("APK превышает ожидаемый размер");digest.update(block,0,n);out.write(block,0,n);long now=SystemClock.elapsedRealtime();if(now-lastProgress>250){long value=count;post(job,()->{downloaded=value;render();});lastProgress=now;}}out.getFD().sync();
-            }finally{conn.disconnect();job.connection=null;}
-            cancelled(job);if(count!=selected.size)throw new IOException("APK скачан не полностью");
+            UpdateDownload.fetch(partial,selected.size,selected.url,new UpdateDownload.Connections(){
+                public HttpURLConnection open(String url,long from,long to)throws Exception{return AppUpdates.this.open(job,url,from,to);}
+                public void release(HttpURLConnection connection){AppUpdates.release(job,connection);}
+                public void abort(){halt(job);}
+                public void check()throws InterruptedIOException{cancelled(job);}
+            },value->{synchronized(job){job.received=Math.max(job.received,value);long now=SystemClock.elapsedRealtime();if(now-job.lastProgress>=500){long count=job.received;post(job,()->{downloaded=Math.max(downloaded,count);render();});job.lastProgress=now;}}});
+            cancelled(job);post(job,()->{downloaded=selected.size;downloading=false;status="Проверяем скачанный APK…";render();});
+            MessageDigest digest=MessageDigest.getInstance("SHA-256");try(RandomAccessFile out=new RandomAccessFile(partial,"rw")){out.getFD().sync();}
+            try(InputStream in=new FileInputStream(partial)){byte[] block=new byte[128*1024];int n;while((n=in.read(block))!=-1){cancelled(job);digest.update(block,0,n);}}
             if(!selected.digest.equals(Io.hex(digest.digest())))throw new IOException("Контрольная сумма APK не совпала. Установка отменена");
             verify(activity,partial,selected,installedCode);cancelled(job);
             if(!partial.renameTo(target))throw new IOException("Не удалось сохранить обновление");success=true;
-            post(job,()->{busy=false;ready=true;downloaded=selected.size;status="Обновление скачано и проверено";render();install();});
-        }catch(Exception e){failed(job,"Не удалось скачать обновление. "+reason(e));}finally{partial.delete();if(!success)target.delete();}});
+            post(job,()->{busy=false;downloading=false;ready=true;downloaded=selected.size;status="Обновление скачано и проверено";render();install();});
+        }catch(Exception e){failed(job,"Не удалось скачать обновление. "+reason(e));}finally{partial.delete();folder.delete();if(!success||job.cancelled)target.delete();job.runner=null;}});
     }
     static void verify(Context context,File apk,UpdateRelease expected,long installedCode)throws Exception{
         PackageManager pm=context.getPackageManager();int flags=Build.VERSION.SDK_INT>=28?PackageManager.GET_SIGNING_CERTIFICATES:PackageManager.GET_SIGNATURES;
@@ -99,22 +114,28 @@ final class AppUpdates implements AutoCloseable {
     private boolean canInstall(){if(activity instanceof MainActivity a&&!a.updateScreenVisible()){status="Обновление скачано. Откройте приложение, чтобы начать установку";render();return false;}if(activity instanceof MainActivity a&&!a.canInstallAppUpdate()){status="Дождитесь завершения записи и скачивания файлов перед установкой";render();return false;}return true;}
     private void launchInstaller(){if(!canInstall())return;try{activity.startActivity(UpdateProvider.installer(activity));if(dialog!=null)dialog.dismiss();}catch(ActivityNotFoundException|SecurityException e){status="Android не смог открыть установщик. Можно скачать APK со страницы GitHub";render();}}
     private void openRelease(){try{activity.startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(UpdateRelease.REPOSITORY+"/releases/latest")));}catch(ActivityNotFoundException ignored){}}
-    private HttpURLConnection open(Task job,String address)throws Exception{
+    private HttpURLConnection open(Task job,String address)throws Exception{return open(job,address,-1,-1);}
+    private HttpURLConnection open(Task job,String address,long from,long to)throws Exception{
         URL url=new URL(address);
         for(int redirects=0;redirects<=5;redirects++){
             cancelled(job);if(!safe(url))throw new IOException("Недопустимый адрес обновления");
-            HttpURLConnection c=(HttpURLConnection)url.openConnection();job.connection=c;c.setConnectTimeout(10000);c.setReadTimeout(15000);c.setInstanceFollowRedirects(false);c.setRequestProperty("User-Agent","Zem-iBox/"+BuildConfig.VERSION_NAME);c.setRequestProperty("Accept",address.equals(endpoint)?"application/vnd.github+json":"application/octet-stream");
-            int code;try{code=c.getResponseCode();}catch(Exception e){c.disconnect();job.connection=null;throw e;}if(code==200)return c;
-            if(Arrays.asList(301,302,303,307,308).contains(code)){String location=c.getHeaderField("Location");c.disconnect();if(location==null)throw new IOException("Пустая ссылка перенаправления");url=new URL(url,location);continue;}
-            c.disconnect();if(code==403||code==429)throw new IOException("GitHub ограничил частоту запросов. Повторите позже");if(code==404)throw new IOException("Релиз или файл обновления не найден");throw new IOException("GitHub вернул ошибку HTTP "+code);
+            HttpURLConnection c=(HttpURLConnection)url.openConnection();job.connections.add(c);if(job.cancelled||job.halted){release(job,c);cancelled(job);}c.setConnectTimeout(10000);c.setReadTimeout(5000);c.setInstanceFollowRedirects(false);c.setRequestProperty("User-Agent","Zem-iBox/"+BuildConfig.VERSION_NAME);c.setRequestProperty("Accept",address.equals(endpoint)?"application/vnd.github+json":"application/octet-stream");c.setRequestProperty("Accept-Encoding","identity");if(from>=0)c.setRequestProperty("Range","bytes="+from+"-"+to);
+            int code;try{code=c.getResponseCode();}catch(Exception e){release(job,c);throw e;}if(code==200||from>=0&&code==206)return c;
+            if(Arrays.asList(301,302,303,307,308).contains(code)){String location=c.getHeaderField("Location");release(job,c);if(location==null)throw new IOException("Пустая ссылка перенаправления");url=new URL(url,location);continue;}
+            release(job,c);if(code==403||code==429)throw new IOException("GitHub ограничил частоту запросов. Повторите позже");if(code==404)throw new IOException("Релиз или файл обновления не найден");throw new IOException("GitHub вернул ошибку HTTP "+code);
         }throw new IOException("Слишком много перенаправлений");
     }
     private boolean safe(URL url){if(!testOrigin.isEmpty())return (url.getProtocol()+"://"+url.getAuthority()).equals(testOrigin)&&url.getUserInfo()==null;return "https".equals(url.getProtocol())&&url.getUserInfo()==null&&(url.getPort()==-1||url.getPort()==443)&&Arrays.asList("api.github.com","github.com","release-assets.githubusercontent.com","objects.githubusercontent.com","github-releases.githubusercontent.com").contains(url.getHost());}
-    private byte[] read(Task job,String url,int limit)throws Exception{HttpURLConnection c=open(job,url);try(InputStream in=c.getInputStream();ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] b=new byte[16384];int n;while((n=in.read(b))!=-1){cancelled(job);if(out.size()+n>limit)throw new IOException("Ответ GitHub слишком большой");out.write(b,0,n);}return out.toByteArray();}finally{c.disconnect();job.connection=null;}}
+    private byte[] read(Task job,String url,int limit)throws Exception{HttpURLConnection c=open(job,url);try(InputStream in=c.getInputStream();ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] b=new byte[16384];int n;while((n=in.read(b))!=-1){cancelled(job);if(out.size()+n>limit)throw new IOException("Ответ GitHub слишком большой");out.write(b,0,n);}return out.toByteArray();}finally{release(job,c);}}
     private void post(Task job,Runnable action){main.post(()->{if(!closed&&task==job&&!job.cancelled)action.run();});}
-    private void failed(Task job,String text){post(job,()->{busy=false;ready=false;status=text;render();});Diag.log("UPDATE",job.cancelled?"Cancelled":text);}
+    private void failed(Task job,String text){post(job,()->{busy=false;downloading=false;ready=false;status=text;render();});Diag.log("UPDATE",job.cancelled?"Cancelled":text);}
     private static String reason(Exception e){if(e instanceof SocketTimeoutException)return "Истекло время ожидания. Проверьте доступ к интернету";if(e instanceof UnknownHostException||e instanceof ConnectException)return "Нужен доступ к интернету; Wi-Fi регистратора может работать без него";return e.getMessage()==null?"Повторите попытку позже":e.getMessage();}
-    private static void cancelled(Task job)throws InterruptedIOException{if(job.cancelled||Thread.currentThread().isInterrupted())throw new InterruptedIOException("Скачивание отменено");}
-    void cancel(){Task current=task;if(current!=null){current.cancelled=true;HttpURLConnection c=current.connection;if(c!=null)new Thread(c::disconnect,"Cancel app update").start();}busy=false;if(!ready)status="Проверка или скачивание отменены";changed.run();}
+    private static void cancelled(Task job)throws InterruptedIOException{if(job.cancelled||job.halted||Thread.currentThread().isInterrupted())throw new InterruptedIOException("Скачивание отменено");}
+    private static void release(Task job,HttpURLConnection connection){job.connections.remove(connection);connection.disconnect();}
+    private static void halt(Task job){job.halted=true;for(HttpURLConnection c:job.connections)new Thread(c::disconnect,"Cancel app update connection").start();}
+    void cancel(){
+        if(!busy)return;Task current=task;if(current!=null){current.cancelled=true;halt(current);Thread runner=current.runner;if(runner!=null)runner.interrupt();}
+        busy=false;downloading=false;ready=false;downloaded=0;UpdateProvider.apk(activity).delete();status="Скачивание или проверка отменены";render();
+    }
     public void close(){closed=true;cancel();if(dialog!=null)dialog.dismiss();if(permissionDialog!=null)permissionDialog.dismiss();worker.shutdownNow();}
 }
